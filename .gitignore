@@ -1,0 +1,6 @@
+/target
+/dist
+*.vdm.part
+*.tmp
+.DS_Store
+Thumbs.db

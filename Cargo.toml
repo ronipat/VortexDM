@@ -1,0 +1,49 @@
+[package]
+name = "vortexdm"
+version = "1.1.0"
+edition = "2021"
+description = "VortexDM — High-performance multi-segmented Windows download manager in Rust"
+authors = ["VortexDM Contributors"]
+
+[dependencies]
+eframe = { version = "0.31", default-features = true }
+egui = "0.31"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "stream", "gzip", "deflate", "brotli"] }
+librqbit = { version = "9.1", default-features = false, features = ["default-tls"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+url = "2"
+tray-icon = "0.26"
+raw-window-handle = "0.6"
+rfd = "0.15"
+arboard = "3"
+directories = "6"
+percent-encoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+] }
+winreg = "0.55"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
