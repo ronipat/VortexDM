@@ -4,6 +4,11 @@ All notable architecture, engine, UI, OS integration, and installer changes made
 
 ## [1.1.0] — Development & Stabilization Release
 
+### Bilingual Localization (English & Bahasa Indonesia) (`src/models.rs`, `src/ui.rs`, `src/tray_popup.rs`)
+- **Language Model & Persistence (`Language` enum):** Added `Language::English` and `Language::Indonesian` with persisted `AppSettings::language` (`#[serde(default)]`) and localized `DownloadStatus::label_tr()` and `FileCategory::label_tr()` helpers.
+- **Instant Toggle & Settings Selector:** Added a one-click **`EN` / `ID`** toggle pill in the top header bar and **Language / Bahasa** preset chips (`English` / `Bahasa Indonesia`) at the top of the **Settings** modal with live preview.
+- **Full UI Coverage:** Localized header controls, sidebar navigation (`ANTREAN` / `KATEGORI` / `MESIN AKTIF`), KPI cards, clipboard banner, segmented workspace tabs (`Unduhan` / `Selesai`, `Jeda Semua`, `Lanjutkan Semua`, `Bersihkan Selesai`), sort/search/bulk bars, download cards, bottom inspector, status footer, confirmation modals, and the system tray popup flyout.
+
 ### Core HTTP/HTTPS Multi-Segment Engine (`src/engine.rs`, `src/throttle.rs`, `src/storage.rs`)
 - **HTTP Probing & Filename Resolution:** Implemented `HEAD` probing with automatic `GET Range: bytes=0-0` fallback for `405 Method Not Allowed` / `501` / sneaky `200 OK` servers, RFC 5987 `Content-Disposition` decoding, and Windows disk space pre-checks (`GetDiskFreeSpaceExW`).
 - **Dynamic In-Half Work Stealing & Adaptive Segmentation:** Adaptive segment sizing (`1–32` parallel byte-range connections) with IDM-style dynamic work stealing when active workers finish ahead of slower chunks.

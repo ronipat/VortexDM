@@ -46,13 +46,13 @@ enum SortBy {
 }
 
 impl SortBy {
-    fn label(&self) -> &'static str {
+    fn label_tr(&self, lang: Language) -> &'static str {
         match self {
-            SortBy::Newest => "Newest",
-            SortBy::Name => "Name",
-            SortBy::Size => "Size",
-            SortBy::Speed => "Speed",
-            SortBy::Progress => "Progress",
+            SortBy::Newest => lang.tr("Newest", "Terbaru"),
+            SortBy::Name => lang.tr("Name", "Nama"),
+            SortBy::Size => lang.tr("Size", "Ukuran"),
+            SortBy::Speed => lang.tr("Speed", "Kecepatan"),
+            SortBy::Progress => lang.tr("Progress", "Progres"),
         }
     }
 }
@@ -253,6 +253,18 @@ impl VortexApp {
         self.engine.send(EngineCommand::UpdateSettings(updated));
     }
 
+    fn toggle_language(&mut self, snap: &EngineSnapshot) {
+        let mut updated = snap.settings.clone();
+        updated.language = match updated.language {
+            Language::English => Language::Indonesian,
+            Language::Indonesian => Language::English,
+        };
+        self.settings_draft.language = updated.language;
+        let next_lang = updated.language;
+        self.engine.send(EngineCommand::UpdateSettings(updated));
+        self.notify(next_lang.tr("Language: English", "Bahasa: Bahasa Indonesia"));
+    }
+
     fn open_add_modal(&mut self, settings: &AppSettings, prefill_url: Option<String>) {
         self.settings_open = false;
         self.delete_confirm = None;
@@ -274,7 +286,10 @@ impl VortexApp {
 
     fn open_torrent_file_picker(&mut self, settings: &AppSettings) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("BitTorrent Files", &["torrent"])
+            .add_filter(
+                settings.language.tr("BitTorrent Files", "Berkas BitTorrent"),
+                &["torrent"],
+            )
             .pick_file()
         {
             self.open_add_modal(settings, Some(path.display().to_string()));
@@ -282,6 +297,7 @@ impl VortexApp {
     }
 
     fn submit_quick_url(&mut self, settings: &AppSettings) {
+        let lang = settings.language;
         let url = self.quick_url_input.trim().to_string();
         if is_torrent_input(&url) {
             self.quick_url_input.clear();
@@ -296,16 +312,25 @@ impl VortexApp {
                 start_paused: false,
             }));
             self.quick_url_input.clear();
-            self.notify("Download queued");
+            self.notify(lang.tr("Download queued", "Unduhan masuk antrean"));
         } else if !url.is_empty() {
-            self.notify("Enter an http://, https://, magnet:? link, or .torrent path");
+            self.notify(lang.tr(
+                "Enter an http://, https://, magnet:? link, or .torrent path",
+                "Masukkan tautan http://, https://, magnet:?, atau jalur berkas .torrent",
+            ));
         }
     }
 
-    fn start_probe(&mut self, egui_ctx: egui::Context) {
+    fn start_probe(&mut self, egui_ctx: egui::Context, lang: Language) {
         let url = self.add_modal.url.trim().to_string();
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            self.add_modal.error = Some("Enter a valid http:// or https:// URL".to_string());
+            self.add_modal.error = Some(
+                lang.tr(
+                    "Enter a valid http:// or https:// URL",
+                    "Masukkan URL http:// atau https:// yang valid",
+                )
+                .to_string(),
+            );
             return;
         }
         self.add_modal.error = None;
@@ -372,6 +397,7 @@ impl VortexApp {
     }
 
     fn poll_tray_actions(&mut self, ctx: &egui::Context, snap: &EngineSnapshot) {
+        let lang = snap.settings.language;
         while let Ok(action) = self.tray_rx.try_recv() {
             match action {
                 TrayAction::ShowWindow => {
@@ -390,18 +416,25 @@ impl VortexApp {
                 }
                 TrayAction::PauseAll => {
                     self.engine.send(EngineCommand::PauseAll);
-                    self.notify("Paused all active downloads");
+                    self.notify(lang.tr("Paused all active downloads", "Semua unduhan aktif dijeda"));
                 }
                 TrayAction::ResumeAll => {
                     self.engine.send(EngineCommand::ResumeAll);
-                    self.notify("Resumed downloads");
+                    self.notify(lang.tr("Resumed downloads", "Melanjutkan unduhan"));
                 }
                 TrayAction::SetSpeedLimit(bps) => {
                     self.engine.send(EngineCommand::SetGlobalSpeedLimit(bps));
                     if bps == 0 {
-                        self.notify("Bandwidth limit: Unlimited");
+                        self.notify(lang.tr(
+                            "Bandwidth limit: Unlimited",
+                            "Batas kecepatan: Tanpa Batas",
+                        ));
                     } else {
-                        self.notify(format!("Bandwidth capped at {}", format_speed(bps as f64)));
+                        self.notify(format!(
+                            "{} {}",
+                            lang.tr("Bandwidth capped at", "Kecepatan dibatasi hingga"),
+                            format_speed(bps as f64)
+                        ));
                     }
                 }
                 TrayAction::OpenDownloadsFolder => {
@@ -636,7 +669,7 @@ impl eframe::App for VortexApp {
                             .stroke(Stroke::new(1.0_f32, p.border)),
                     )
                     .show(ctx, |ui| {
-                        self.render_inspector(ui, &item, &p);
+                        self.render_inspector(ui, &item, snap.settings.language, &p);
                     });
             } else {
                 self.selected_id = None;
@@ -668,7 +701,7 @@ impl eframe::App for VortexApp {
             self.render_settings_modal(ctx, &p);
         }
         if self.delete_confirm.is_some() {
-            self.render_delete_confirm_modal(ctx, &p);
+            self.render_delete_confirm_modal(ctx, snap.settings.language, &p);
         }
         if self.clear_completed_confirm {
             self.render_clear_completed_confirm_modal(ctx, &snap, &p);
@@ -678,6 +711,7 @@ impl eframe::App for VortexApp {
 
 impl VortexApp {
     fn render_header(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         let compact_hdr = ui.available_width() < 860.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = if compact_hdr { 4.0 } else { 6.0 };
@@ -698,22 +732,29 @@ impl VortexApp {
                     status_pill(ui, &format!("v{}", APP_VERSION), p.brand, p);
                 });
                 ui.label(
-                    RichText::new("HTTP & BitTorrent Engine")
+                    RichText::new(lang.tr("HTTP & BitTorrent Engine", "Mesin HTTP & BitTorrent"))
                         .font(body_font(10.0))
                         .color(p.text_muted),
                 );
             });
 
-            // Right side: CTA button + utility icons + Theme toggle + Speed limit
+            // Right side: CTA button + utility icons + Theme toggle + Language toggle + Speed limit
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 5.0;
                 if brand_cta_button(
                     ui,
-                    if compact_hdr { "New" } else { "New Download" },
+                    if compact_hdr {
+                        lang.tr("New", "Baru")
+                    } else {
+                        lang.tr("New Download", "Unduhan Baru")
+                    },
                     Some(VectorIcon::Plus),
                     p,
                 )
-                    .on_hover_text("Add a new download or magnet link (Ctrl+N)")
+                    .on_hover_text(lang.tr(
+                        "Add a new download or magnet link (Ctrl+N)",
+                        "Tambah unduhan atau tautan magnet baru (Ctrl+N)",
+                    ))
                     .clicked()
                 {
                     self.open_add_modal(&snap.settings, None);
@@ -723,7 +764,10 @@ impl VortexApp {
                     && square_icon_button(
                         ui,
                         VectorIcon::Tray,
-                        "Minimize to Windows System Tray",
+                        lang.tr(
+                            "Minimize to Windows System Tray",
+                            "Kecilkan ke Baki Sistem Windows",
+                        ),
                         p,
                         29.0,
                     )
@@ -732,7 +776,15 @@ impl VortexApp {
                     self.hide_to_tray(ui.ctx());
                 }
 
-                if square_icon_button(ui, VectorIcon::Gear, "Settings", p, 29.0).clicked() {
+                if square_icon_button(
+                    ui,
+                    VectorIcon::Gear,
+                    lang.tr("Settings", "Pengaturan"),
+                    p,
+                    29.0,
+                )
+                .clicked()
+                {
                     self.add_modal.open = false;
                     self.delete_confirm = None;
                     self.clear_completed_confirm = false;
@@ -754,24 +806,46 @@ impl VortexApp {
                     VectorIcon::Moon
                 };
                 let theme_tip = if p.dark {
-                    "Switch to Light Mode (Warm Paper)"
+                    lang.tr(
+                        "Switch to Light Mode (Warm Paper)",
+                        "Ganti ke Mode Terang (Warm Paper)",
+                    )
                 } else {
-                    "Switch to Dark Mode (Warm Charcoal)"
+                    lang.tr(
+                        "Switch to Dark Mode (Warm Charcoal)",
+                        "Ganti ke Mode Gelap (Warm Charcoal)",
+                    )
                 };
                 if square_icon_button(ui, theme_icon, theme_tip, p, 29.0).clicked() {
                     self.toggle_theme(ui.ctx(), snap);
+                }
+
+                // One-click Language switcher pill (EN / ID)
+                let lang_tip = match lang {
+                    Language::English => "Switch language to Bahasa Indonesia",
+                    Language::Indonesian => "Ganti bahasa ke Bahasa Inggris",
+                };
+                if secondary_button(ui, lang.code(), None, p)
+                    .on_hover_text(lang_tip)
+                    .clicked()
+                {
+                    self.toggle_language(snap);
                 }
 
                 // Bandwidth cap selector
                 let cur_limit = snap.settings.global_speed_limit_bps;
                 let limit_label = if cur_limit == 0 {
                     if compact_hdr {
-                        "Cap: Unlim".to_string()
+                        lang.tr("Cap: Unlim", "Batas: Penuh").to_string()
                     } else {
-                        "Cap: Unlimited".to_string()
+                        lang.tr("Cap: Unlimited", "Batas: Tanpa Batas").to_string()
                     }
                 } else {
-                    format!("Cap: {}", format_speed(cur_limit as f64))
+                    format!(
+                        "{} {}",
+                        lang.tr("Cap:", "Batas:"),
+                        format_speed(cur_limit as f64)
+                    )
                 };
 
                 egui::ComboBox::from_id_salt("header_speed_limit")
@@ -780,10 +854,16 @@ impl VortexApp {
                             .font(mono_font(11.0))
                             .color(if cur_limit == 0 { p.text_muted } else { p.brand }),
                     )
-                    .width(if compact_hdr { 86.0 } else { 112.0 })
+                    .width(if compact_hdr {
+                        88.0
+                    } else if lang == Language::Indonesian {
+                        128.0
+                    } else {
+                        112.0
+                    })
                     .show_ui(ui, |ui| {
                         let presets: &[(&str, u64)] = &[
-                            ("Unlimited", 0),
+                            (lang.tr("Unlimited", "Tanpa Batas"), 0),
                             ("512 KB/s", 512 * 1024),
                             ("2 MB/s", 2 * 1024 * 1024),
                             ("5 MB/s", 5 * 1024 * 1024),
@@ -801,6 +881,7 @@ impl VortexApp {
     }
 
     fn render_sidebar(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         let bottom_card_h = 122.0;
         let scroll_h = (ui.available_height() - bottom_card_h - 8.0).max(100.0);
 
@@ -811,7 +892,7 @@ impl VortexApp {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(
-                    RichText::new("QUEUE")
+                    RichText::new(lang.tr("QUEUE", "ANTREAN"))
                         .font(bold_font(10.0))
                         .color(p.text_subtle),
                 );
@@ -825,7 +906,7 @@ impl VortexApp {
 
                 sidebar_nav_row(
                     ui,
-                    "Downloads",
+                    lang.tr("Downloads", "Unduhan"),
                     in_progress_count,
                     p.brand,
                     self.filter == SidebarFilter::All,
@@ -834,7 +915,7 @@ impl VortexApp {
                 );
                 sidebar_nav_row(
                     ui,
-                    "Active",
+                    lang.tr("Active", "Aktif"),
                     snap.stats.active_count,
                     p.brand,
                     self.filter == SidebarFilter::Active,
@@ -843,7 +924,7 @@ impl VortexApp {
                 );
                 sidebar_nav_row(
                     ui,
-                    "Queued",
+                    lang.tr("Queued", "Antrean"),
                     snap.stats.queued_count,
                     p.info,
                     self.filter == SidebarFilter::Queued,
@@ -852,7 +933,7 @@ impl VortexApp {
                 );
                 sidebar_nav_row(
                     ui,
-                    "Paused",
+                    lang.tr("Paused", "Dijeda"),
                     snap.stats.paused_count,
                     p.warning,
                     self.filter == SidebarFilter::Paused,
@@ -861,7 +942,7 @@ impl VortexApp {
                 );
                 sidebar_nav_row(
                     ui,
-                    "Completed",
+                    lang.tr("Completed", "Selesai"),
                     snap.stats.completed_count,
                     p.success,
                     self.filter == SidebarFilter::Completed,
@@ -870,7 +951,7 @@ impl VortexApp {
                 );
                 sidebar_nav_row(
                     ui,
-                    "Failed / Stopped",
+                    lang.tr("Failed / Stopped", "Gagal / Berhenti"),
                     snap.stats.failed_count,
                     p.danger,
                     self.filter == SidebarFilter::Failed,
@@ -880,7 +961,7 @@ impl VortexApp {
 
                 ui.add_space(12.0);
                 ui.label(
-                    RichText::new("CATEGORIES")
+                    RichText::new(lang.tr("CATEGORIES", "KATEGORI"))
                         .font(bold_font(10.0))
                         .color(p.text_subtle),
                 );
@@ -890,7 +971,7 @@ impl VortexApp {
                     let count = snap.downloads.iter().filter(|d| d.category == cat).count();
                     sidebar_nav_row(
                         ui,
-                        cat.label(),
+                        cat.label_tr(lang),
                         count,
                         p.category_color(cat),
                         self.filter == SidebarFilter::Category(cat),
@@ -913,15 +994,19 @@ impl VortexApp {
                         ui.spacing_mut().item_spacing.y = 3.0;
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("LIVE ENGINE")
+                                RichText::new(lang.tr("LIVE ENGINE", "MESIN AKTIF"))
                                     .font(bold_font(9.5))
                                     .color(p.text_subtle),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(
-                                    RichText::new(format!("{} sockets", snap.stats.total_connections))
-                                        .font(mono_font(10.0))
-                                        .color(p.brand),
+                                    RichText::new(format!(
+                                        "{} {}",
+                                        snap.stats.total_connections,
+                                        lang.tr("sockets", "soket")
+                                    ))
+                                    .font(mono_font(10.0))
+                                    .color(p.brand),
                                 );
                             });
                         });
@@ -940,7 +1025,8 @@ impl VortexApp {
 
                         ui.label(
                             RichText::new(format!(
-                                "Session: {}",
+                                "{} {}",
+                                lang.tr("Session:", "Sesi:"),
                                 format_bytes(snap.stats.session_downloaded_bytes)
                             ))
                             .font(mono_font(10.0))
@@ -952,6 +1038,7 @@ impl VortexApp {
     }
 
     fn render_kpi_strip(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         let free_str = self
             .cached_disk_free
             .map(format_bytes)
@@ -960,48 +1047,56 @@ impl VortexApp {
         ui.columns(4, |cols| {
             kpi_card(
                 &mut cols[0],
-                "LIVE THROUGHPUT",
+                lang.tr("LIVE THROUGHPUT", "KECEPATAN UNDUH"),
                 &format_speed(snap.stats.total_speed_bps),
                 if snap.settings.global_speed_limit_bps > 0 {
                     format!(
-                        "Capped at {}",
+                        "{} {}",
+                        lang.tr("Capped at", "Dibatasi"),
                         format_speed(snap.settings.global_speed_limit_bps as f64)
                     )
                 } else {
-                    "EWMA • Unlimited".to_string()
+                    lang.tr("EWMA • Unlimited", "EWMA • Tanpa Batas").to_string()
                 },
                 p.brand,
                 p,
             );
             kpi_card(
                 &mut cols[1],
-                "ACTIVE TRANSFERS",
-                &format!("{} active", snap.stats.active_count),
+                lang.tr("ACTIVE TRANSFERS", "TRANSFER AKTIF"),
+                &format!("{} {}", snap.stats.active_count, lang.tr("active", "aktif")),
                 format!(
-                    "{} queued • {} parallel sockets",
-                    snap.stats.queued_count, snap.stats.total_connections
+                    "{} {} • {} {}",
+                    snap.stats.queued_count,
+                    lang.tr("queued", "antrean"),
+                    snap.stats.total_connections,
+                    lang.tr("parallel sockets", "soket paralel")
                 ),
                 p.info,
                 p,
             );
             kpi_card(
                 &mut cols[2],
-                "SESSION VOLUME",
+                lang.tr("SESSION VOLUME", "VOLUME SESI"),
                 &format_bytes(snap.stats.session_downloaded_bytes),
-                format!("{} completed total", snap.stats.completed_count),
+                format!(
+                    "{} {}",
+                    snap.stats.completed_count,
+                    lang.tr("completed total", "total selesai")
+                ),
                 p.success,
                 p,
             );
             kpi_card(
                 &mut cols[3],
-                "DISK HEADROOM",
+                lang.tr("DISK HEADROOM", "RUANG DISK"),
                 &free_str,
                 snap.settings
                     .download_dir
                     .file_name()
                     .and_then(|s| s.to_str())
-                    .map(|s| format!("Target: {}", s))
-                    .unwrap_or_else(|| "Download drive".to_string()),
+                    .map(|s| format!("{} {}", lang.tr("Target:", "Tujuan:"), s))
+                    .unwrap_or_else(|| lang.tr("Download drive", "Drive unduhan").to_string()),
                 p.purple,
                 p,
             );
@@ -1009,6 +1104,7 @@ impl VortexApp {
     }
 
     fn render_clipboard_banner(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         if let Some(url) = self.clipboard_banner_url.clone() {
             let is_tor = is_torrent_input(&url);
             let banner_col = if is_tor { p.teal } else { p.brand };
@@ -1035,9 +1131,9 @@ impl VortexApp {
 
                         ui.label(
                             RichText::new(if is_tor {
-                                "Torrent link in clipboard"
+                                lang.tr("Torrent link in clipboard", "Tautan torrent di papan klip")
                             } else {
-                                "Link in clipboard"
+                                lang.tr("Link in clipboard", "Tautan di papan klip")
                             })
                             .font(bold_font(12.2))
                             .color(banner_col),
@@ -1062,17 +1158,21 @@ impl VortexApp {
                         );
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if secondary_button(ui, "Dismiss", None, p).clicked() {
+                            if secondary_button(ui, lang.tr("Dismiss", "Tutup"), None, p).clicked()
+                            {
                                 self.clipboard_banner_url = None;
                             }
-                            if !is_tor && secondary_button(ui, "Configure", None, p).clicked() {
+                            if !is_tor
+                                && secondary_button(ui, lang.tr("Configure", "Atur"), None, p)
+                                    .clicked()
+                            {
                                 self.clipboard_banner_url = None;
                                 self.open_add_modal(&snap.settings, Some(url.clone()));
                             }
                             let cta_lbl = if is_tor {
-                                "Review & Download"
+                                lang.tr("Review & Download", "Tinjau & Unduh")
                             } else {
-                                "Download Now"
+                                lang.tr("Download Now", "Unduh Sekarang")
                             };
                             if brand_cta_button(ui, cta_lbl, Some(VectorIcon::Plus), p).clicked() {
                                 self.clipboard_banner_url = None;
@@ -1097,6 +1197,7 @@ impl VortexApp {
     }
 
     fn render_main_area(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         if snap.downloads.is_empty() {
             self.checked_ids.clear();
             self.render_empty_hero(ui, snap, p);
@@ -1139,13 +1240,16 @@ impl VortexApp {
                             ui.spacing_mut().item_spacing.x = 3.0;
                             if tab_segment(
                                 ui,
-                                "Downloads",
+                                lang.tr("Downloads", "Unduhan"),
                                 in_progress_count,
                                 p.brand,
                                 is_downloads_tab,
                                 p,
                             )
-                            .on_hover_text("Show active, queued, paused, and failed downloads")
+                            .on_hover_text(lang.tr(
+                                "Show active, queued, paused, and failed downloads",
+                                "Tampilkan unduhan aktif, antrean, dijeda, dan gagal",
+                            ))
                             .clicked()
                             {
                                 self.set_filter(SidebarFilter::All);
@@ -1153,13 +1257,15 @@ impl VortexApp {
 
                             if tab_segment(
                                 ui,
-                                "Completed",
+                                lang.tr("Completed", "Selesai"),
                                 completed_count,
                                 p.success,
                                 is_completed_tab,
                                 p,
                             )
-                            .on_hover_text("Show finished downloads")
+                            .on_hover_text(
+                                lang.tr("Show finished downloads", "Tampilkan unduhan selesai"),
+                            )
                             .clicked()
                             {
                                 self.set_filter(SidebarFilter::Completed);
@@ -1168,34 +1274,57 @@ impl VortexApp {
                     });
 
                 if is_downloads_tab {
-                    if secondary_button(ui, "Pause All", Some(VectorIcon::Pause), p)
-                        .on_hover_text("Pause all active downloads")
-                        .clicked()
+                    if secondary_button(
+                        ui,
+                        lang.tr("Pause All", "Jeda Semua"),
+                        Some(VectorIcon::Pause),
+                        p,
+                    )
+                    .on_hover_text(
+                        lang.tr("Pause all active downloads", "Jeda semua unduhan aktif"),
+                    )
+                    .clicked()
                     {
                         self.engine.send(EngineCommand::PauseAll);
-                        self.notify("Paused all active downloads");
+                        self.notify(lang.tr(
+                            "Paused all active downloads",
+                            "Semua unduhan aktif dijeda",
+                        ));
                     }
-                    if secondary_button(ui, "Resume All", Some(VectorIcon::Play), p)
-                        .on_hover_text("Resume all paused downloads")
-                        .clicked()
+                    if secondary_button(
+                        ui,
+                        lang.tr("Resume All", "Lanjutkan Semua"),
+                        Some(VectorIcon::Play),
+                        p,
+                    )
+                    .on_hover_text(lang.tr(
+                        "Resume all paused downloads",
+                        "Lanjutkan semua unduhan yang dijeda",
+                    ))
+                    .clicked()
                     {
                         self.engine.send(EngineCommand::ResumeAll);
-                        self.notify("Resumed downloads");
+                        self.notify(lang.tr("Resumed downloads", "Melanjutkan unduhan"));
                     }
                 }
 
                 // Subtle dismissible chip when viewing a sidebar sub-filter or category
                 let sub_filter_label: Option<String> = match self.filter {
-                    SidebarFilter::Active => Some("Active ×".to_string()),
-                    SidebarFilter::Queued => Some("Queued ×".to_string()),
-                    SidebarFilter::Paused => Some("Paused ×".to_string()),
-                    SidebarFilter::Failed => Some("Failed / Stopped ×".to_string()),
-                    SidebarFilter::Category(cat) => Some(format!("{} ×", cat.label())),
+                    SidebarFilter::Active => Some(format!("{} ×", lang.tr("Active", "Aktif"))),
+                    SidebarFilter::Queued => Some(format!("{} ×", lang.tr("Queued", "Antrean"))),
+                    SidebarFilter::Paused => Some(format!("{} ×", lang.tr("Paused", "Dijeda"))),
+                    SidebarFilter::Failed => {
+                        Some(format!("{} ×", lang.tr("Failed / Stopped", "Gagal / Berhenti")))
+                    }
+                    SidebarFilter::Category(cat) => Some(format!("{} ×", cat.label_tr(lang))),
                     SidebarFilter::All | SidebarFilter::Completed => None,
                 };
                 if let Some(lbl) = sub_filter_label {
                     if preset_chip(ui, &lbl, true, p)
-                        .on_hover_text("Reset filter to all in-progress downloads")
+                        .on_hover_text(lang.tr(
+                            "Reset filter to all in-progress downloads",
+                            "Atur ulang penyaring ke semua unduhan berlangsung",
+                        ))
                         .clicked()
                     {
                         self.set_filter(SidebarFilter::All);
@@ -1204,11 +1333,17 @@ impl VortexApp {
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if is_completed_tab && completed_count > 0 {
-                        if secondary_button(ui, "Clear Completed", Some(VectorIcon::Clear), p)
-                            .on_hover_text(
-                                "Remove all completed downloads from list (confirmation required)",
-                            )
-                            .clicked()
+                        if secondary_button(
+                            ui,
+                            lang.tr("Clear Completed", "Bersihkan Selesai"),
+                            Some(VectorIcon::Clear),
+                            p,
+                        )
+                        .on_hover_text(lang.tr(
+                            "Remove all completed downloads from list (confirmation required)",
+                            "Hapus semua unduhan selesai dari daftar (konfirmasi diperlukan)",
+                        ))
+                        .clicked()
                         {
                             self.add_modal.open = false;
                             self.settings_open = false;
@@ -1337,9 +1472,15 @@ impl VortexApp {
 
                 let sel_resp = custom_checkbox(ui, all_selected, some_selected, p).on_hover_text(
                     if all_selected {
-                        "Deselect all visible downloads"
+                        lang.tr(
+                            "Deselect all visible downloads",
+                            "Batal pilih semua unduhan yang terlihat",
+                        )
                     } else {
-                        "Select all visible downloads (Ctrl+A)"
+                        lang.tr(
+                            "Select all visible downloads (Ctrl+A)",
+                            "Pilih semua unduhan yang terlihat (Ctrl+A)",
+                        )
                     },
                 );
                 if sel_resp.clicked() {
@@ -1354,11 +1495,22 @@ impl VortexApp {
                     }
                 }
 
-                let search_w = (ui.available_width() - 185.0).clamp(140.0, 320.0);
-                let search_hint = if self.filter == SidebarFilter::Completed {
-                    "Filter completed downloads by filename or URL..."
+                let sort_reserve = if lang == Language::Indonesian {
+                    204.0
                 } else {
-                    "Filter downloads by filename or URL..."
+                    185.0
+                };
+                let search_w = (ui.available_width() - sort_reserve).clamp(140.0, 320.0);
+                let search_hint = if self.filter == SidebarFilter::Completed {
+                    lang.tr(
+                        "Filter completed downloads by filename or URL...",
+                        "Saring unduhan selesai berdasarkan nama atau URL...",
+                    )
+                } else {
+                    lang.tr(
+                        "Filter downloads by filename or URL...",
+                        "Saring unduhan berdasarkan nama atau URL...",
+                    )
                 };
                 // Search input card
                 egui::Frame::new()
@@ -1374,7 +1526,9 @@ impl VortexApp {
                                     .hint_text(RichText::new(search_hint).color(p.text_subtle))
                                     .desired_width(search_w),
                             );
-                            if !self.search_query.is_empty() && ui.small_button("Clear").clicked() {
+                            if !self.search_query.is_empty()
+                                && ui.small_button(lang.tr("Clear", "Hapus")).clicked()
+                            {
                                 self.search_query.clear();
                             }
                         });
@@ -1383,11 +1537,19 @@ impl VortexApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     egui::ComboBox::from_id_salt("sort_downloads")
                         .selected_text(
-                            RichText::new(format!("Sort: {}", self.sort_by.label()))
-                                .font(body_font(12.5))
-                                .color(p.text_main),
+                            RichText::new(format!(
+                                "{} {}",
+                                lang.tr("Sort:", "Urutkan:"),
+                                self.sort_by.label_tr(lang)
+                            ))
+                            .font(body_font(12.5))
+                            .color(p.text_main),
                         )
-                        .width(125.0)
+                        .width(if lang == Language::Indonesian {
+                            145.0
+                        } else {
+                            125.0
+                        })
                         .show_ui(ui, |ui| {
                             for opt in [
                                 SortBy::Newest,
@@ -1396,7 +1558,7 @@ impl VortexApp {
                                 SortBy::Speed,
                                 SortBy::Progress,
                             ] {
-                                ui.selectable_value(&mut self.sort_by, opt, opt.label());
+                                ui.selectable_value(&mut self.sort_by, opt, opt.label_tr(lang));
                             }
                         });
                 });
@@ -1416,12 +1578,21 @@ impl VortexApp {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 7.0;
-                        status_pill(ui, &format!("{} SELECTED", total_checked), p.brand, p);
+                        status_pill(
+                            ui,
+                            &format!("{} {}", total_checked, lang.tr("SELECTED", "DIPILIH")),
+                            p.brand,
+                            p,
+                        );
 
                         if !all_selected && filtered_count > 0 {
                             if preset_chip(
                                 ui,
-                                &format!("Select all ({})", filtered_count),
+                                &format!(
+                                    "{} ({})",
+                                    lang.tr("Select all", "Pilih semua"),
+                                    filtered_count
+                                ),
                                 false,
                                 p,
                             )
@@ -1433,7 +1604,7 @@ impl VortexApp {
                             }
                         }
 
-                        if preset_chip(ui, "Clear", false, p).clicked() {
+                        if preset_chip(ui, lang.tr("Clear", "Batal pilih"), false, p).clicked() {
                             self.checked_ids.clear();
                         }
 
@@ -1441,11 +1612,14 @@ impl VortexApp {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             if danger_cta_button(
                                 ui,
-                                &format!("Delete ({})", total_checked),
+                                &format!("{} ({})", lang.tr("Delete", "Hapus"), total_checked),
                                 Some(VectorIcon::Trash),
                                 p,
                             )
-                            .on_hover_text("Delete all selected downloads (confirmation required)")
+                            .on_hover_text(lang.tr(
+                                "Delete all selected downloads (confirmation required)",
+                                "Hapus semua unduhan yang dipilih (konfirmasi diperlukan)",
+                            ))
                             .clicked()
                             {
                                 let items: Vec<DeleteConfirmItem> = snap
@@ -1470,24 +1644,54 @@ impl VortexApp {
                                 }
                             }
 
-                            if secondary_button(ui, "Resume", Some(VectorIcon::Play), p)
-                                .on_hover_text("Resume all selected paused downloads")
-                                .clicked()
+                            if secondary_button(
+                                ui,
+                                lang.tr("Resume", "Lanjutkan"),
+                                Some(VectorIcon::Play),
+                                p,
+                            )
+                            .on_hover_text(lang.tr(
+                                "Resume all selected paused downloads",
+                                "Lanjutkan semua unduhan terjeda yang dipilih",
+                            ))
+                            .clicked()
                             {
                                 for id in self.checked_ids.iter().copied().collect::<Vec<_>>() {
                                     self.engine.send(EngineCommand::Resume(id));
                                 }
-                                self.notify(format!("Resumed {} selected", total_checked));
+                                self.notify(format!(
+                                    "{} {}",
+                                    lang.tr("Resumed", "Melanjutkan"),
+                                    lang.tr(
+                                        &format!("{} selected", total_checked),
+                                        &format!("{} dipilih", total_checked)
+                                    )
+                                ));
                             }
 
-                            if secondary_button(ui, "Pause", Some(VectorIcon::Pause), p)
-                                .on_hover_text("Pause all selected active downloads")
-                                .clicked()
+                            if secondary_button(
+                                ui,
+                                lang.tr("Pause", "Jeda"),
+                                Some(VectorIcon::Pause),
+                                p,
+                            )
+                            .on_hover_text(lang.tr(
+                                "Pause all selected active downloads",
+                                "Jeda semua unduhan aktif yang dipilih",
+                            ))
+                            .clicked()
                             {
                                 for id in self.checked_ids.iter().copied().collect::<Vec<_>>() {
                                     self.engine.send(EngineCommand::Pause(id));
                                 }
-                                self.notify(format!("Paused {} selected", total_checked));
+                                self.notify(format!(
+                                    "{} {}",
+                                    lang.tr("Paused", "Menjeda"),
+                                    lang.tr(
+                                        &format!("{} selected", total_checked),
+                                        &format!("{} dipilih", total_checked)
+                                    )
+                                ));
                             }
                         });
                     });
@@ -1502,37 +1706,55 @@ impl VortexApp {
                     ui.add_space(46.0);
                     if !query.is_empty() {
                         ui.label(
-                            RichText::new("No matching downloads")
-                                .font(bold_font(16.0))
-                                .color(p.text_main),
+                            RichText::new(lang.tr(
+                                "No matching downloads",
+                                "Tidak ada unduhan yang cocok",
+                            ))
+                            .font(bold_font(16.0))
+                            .color(p.text_main),
                         );
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Try clearing your search query or switching tabs.")
-                                .font(body_font(12.0))
-                                .color(p.text_muted),
+                            RichText::new(lang.tr(
+                                "Try clearing your search query or switching tabs.",
+                                "Coba hapus pencarian Anda atau pindah tab.",
+                            ))
+                            .font(body_font(12.0))
+                            .color(p.text_muted),
                         );
                         ui.add_space(10.0);
-                        if secondary_button(ui, "Clear Search", None, p).clicked() {
+                        if secondary_button(ui, lang.tr("Clear Search", "Hapus Pencarian"), None, p)
+                            .clicked()
+                        {
                             self.search_query.clear();
                         }
                     } else if self.filter == SidebarFilter::All {
                         ui.label(
-                            RichText::new("All downloads completed!")
-                                .font(bold_font(16.0))
-                                .color(p.text_main),
+                            RichText::new(lang.tr(
+                                "All downloads completed!",
+                                "Semua unduhan selesai!",
+                            ))
+                            .font(bold_font(16.0))
+                            .color(p.text_main),
                         );
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Everything in your queue has finished downloading.")
-                                .font(body_font(12.0))
-                                .color(p.text_muted),
+                            RichText::new(lang.tr(
+                                "Everything in your queue has finished downloading.",
+                                "Semua tugas dalam antrean Anda telah selesai diunduh.",
+                            ))
+                            .font(body_font(12.0))
+                            .color(p.text_muted),
                         );
                         if completed_count > 0 {
                             ui.add_space(10.0);
                             if secondary_button(
                                 ui,
-                                &format!("View Completed ({})", completed_count),
+                                &format!(
+                                    "{} ({})",
+                                    lang.tr("View Completed", "Lihat Selesai"),
+                                    completed_count
+                                ),
                                 Some(VectorIcon::Check),
                                 p,
                             )
@@ -1543,21 +1765,31 @@ impl VortexApp {
                         }
                     } else if self.filter == SidebarFilter::Completed {
                         ui.label(
-                            RichText::new("No completed downloads yet")
-                                .font(bold_font(16.0))
-                                .color(p.text_main),
+                            RichText::new(lang.tr(
+                                "No completed downloads yet",
+                                "Belum ada unduhan selesai",
+                            ))
+                            .font(bold_font(16.0))
+                            .color(p.text_main),
                         );
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Finished transfers will appear here automatically.")
-                                .font(body_font(12.0))
-                                .color(p.text_muted),
+                            RichText::new(lang.tr(
+                                "Finished transfers will appear here automatically.",
+                                "Unduhan yang telah selesai akan muncul di sini secara otomatis.",
+                            ))
+                            .font(body_font(12.0))
+                            .color(p.text_muted),
                         );
                         if in_progress_count > 0 {
                             ui.add_space(10.0);
                             if secondary_button(
                                 ui,
-                                &format!("View Downloads ({})", in_progress_count),
+                                &format!(
+                                    "{} ({})",
+                                    lang.tr("View Downloads", "Lihat Unduhan"),
+                                    in_progress_count
+                                ),
                                 None,
                                 p,
                             )
@@ -1568,16 +1800,30 @@ impl VortexApp {
                         }
                     } else {
                         let empty_title = match self.filter {
-                            SidebarFilter::Active => "No active downloads".to_string(),
-                            SidebarFilter::Queued => "No queued downloads".to_string(),
-                            SidebarFilter::Paused => "No paused downloads".to_string(),
-                            SidebarFilter::Failed => "No failed or stopped downloads".to_string(),
-                            SidebarFilter::Category(cat) => {
-                                format!("No downloads in {}", cat.label())
+                            SidebarFilter::Active => {
+                                lang.tr("No active downloads", "Tidak ada unduhan aktif").to_string()
                             }
-                            SidebarFilter::All | SidebarFilter::Completed => {
-                                "No matching downloads".to_string()
+                            SidebarFilter::Queued => lang
+                                .tr("No queued downloads", "Tidak ada unduhan dalam antrean")
+                                .to_string(),
+                            SidebarFilter::Paused => {
+                                lang.tr("No paused downloads", "Tidak ada unduhan yang dijeda")
+                                    .to_string()
                             }
+                            SidebarFilter::Failed => lang
+                                .tr(
+                                    "No failed or stopped downloads",
+                                    "Tidak ada unduhan yang gagal atau berhenti",
+                                )
+                                .to_string(),
+                            SidebarFilter::Category(cat) => format!(
+                                "{} {}",
+                                lang.tr("No downloads in", "Tidak ada unduhan di"),
+                                cat.label_tr(lang)
+                            ),
+                            SidebarFilter::All | SidebarFilter::Completed => lang
+                                .tr("No matching downloads", "Tidak ada unduhan yang cocok")
+                                .to_string(),
                         };
                         ui.label(
                             RichText::new(empty_title)
@@ -1586,12 +1832,22 @@ impl VortexApp {
                         );
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Switch back to all downloads or start a new transfer.")
-                                .font(body_font(12.0))
-                                .color(p.text_muted),
+                            RichText::new(lang.tr(
+                                "Switch back to all downloads or start a new transfer.",
+                                "Kembali ke semua unduhan atau mulai unduhan baru.",
+                            ))
+                            .font(body_font(12.0))
+                            .color(p.text_muted),
                         );
                         ui.add_space(10.0);
-                        if secondary_button(ui, "Show All Downloads", None, p).clicked() {
+                        if secondary_button(
+                            ui,
+                            lang.tr("Show All Downloads", "Tampilkan Semua Unduhan"),
+                            None,
+                            p,
+                        )
+                        .clicked()
+                        {
                             self.set_filter(SidebarFilter::All);
                         }
                     }
@@ -1605,13 +1861,14 @@ impl VortexApp {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 for item in filtered {
-                    self.render_download_card(ui, item, p);
+                    self.render_download_card(ui, item, lang, p);
                 }
             });
     }
 
     /// 9Router-inspired architectural Hero Empty State with instant Quick-URL input & 3 numbered cards.
     fn render_empty_hero(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         egui::ScrollArea::vertical().show(ui, |ui| {
             let avail_w = ui.available_width();
             let content_w = avail_w.min(820.0);
@@ -1624,7 +1881,10 @@ impl VortexApp {
                         ui.add_space(10.0);
 
                         // Compact, snug translucent coral eyebrow pill (exact 9Router hero pill)
-                        let pill_text = "Multi-Segmented HTTP  •  BitTorrent DHT & Magnet  •  SHA-256";
+                        let pill_text = lang.tr(
+                            "Multi-Segmented HTTP  •  BitTorrent DHT & Magnet  •  SHA-256",
+                            "HTTP Multi-Segmen  •  BitTorrent DHT & Magnet  •  SHA-256",
+                        );
                         let pill_galley = ui.painter().layout_no_wrap(
                             pill_text.to_string(),
                             bold_font(10.0),
@@ -1657,21 +1917,25 @@ impl VortexApp {
 
                         // Two-tone editorial headline (exact 9Router "One Router. 60+ AI Providers." feel)
                         ui.label(
-                            RichText::new("One Manager.")
+                            RichText::new(lang.tr("One Manager.", "Satu Manajer."))
                                 .font(bold_font(28.0))
                                 .color(p.text_main),
                         );
                         ui.label(
-                            RichText::new("Maximum Speed. Zero Bottlenecks.")
-                                .font(bold_font(24.0))
-                                .color(p.brand),
+                            RichText::new(lang.tr(
+                                "Maximum Speed. Zero Bottlenecks.",
+                                "Kecepatan Maksimal. Tanpa Hambatan.",
+                            ))
+                            .font(bold_font(24.0))
+                            .color(p.brand),
                         );
 
                         ui.add_space(5.0);
                         ui.label(
-                            RichText::new(
+                            RichText::new(lang.tr(
                                 "Paste an HTTP/HTTPS URL or magnet:? link below, or open a .torrent file to accelerate downloads.",
-                            )
+                                "Tempel URL HTTP/HTTPS atau tautan magnet:? di bawah, atau buka berkas .torrent untuk mempercepat unduhan.",
+                            ))
                             .font(body_font(12.5))
                             .color(p.text_muted),
                         );
@@ -1703,9 +1967,12 @@ impl VortexApp {
                                                             .frame(false)
                                                             .font(mono_font(12.0))
                                                             .hint_text(
-                                                                RichText::new("https://... or magnet:?xt=urn:btih:...")
-                                                                    .font(mono_font(11.5))
-                                                                    .color(p.text_subtle),
+                                                                RichText::new(lang.tr(
+                                                                    "https://... or magnet:?xt=urn:btih:...",
+                                                                    "https://... atau magnet:?xt=urn:btih:...",
+                                                                ))
+                                                                .font(mono_font(11.5))
+                                                                .color(p.text_subtle),
                                                             )
                                                             .desired_width(input_w),
                                                     );
@@ -1716,7 +1983,14 @@ impl VortexApp {
                                                     }
                                                 });
 
-                                            if secondary_button(ui, "Paste", None, p).clicked() {
+                                            if secondary_button(
+                                                ui,
+                                                lang.tr("Paste", "Tempel"),
+                                                None,
+                                                p,
+                                            )
+                                            .clicked()
+                                            {
                                                 if let Ok(mut cb) = arboard::Clipboard::new() {
                                                     if let Ok(txt) = cb.get_text() {
                                                         self.quick_url_input = txt.trim().to_string();
@@ -1725,13 +1999,23 @@ impl VortexApp {
                                             }
 
                                             if secondary_button(ui, ".torrent", Some(VectorIcon::Magnet), p)
-                                                .on_hover_text("Open a local .torrent file")
+                                                .on_hover_text(lang.tr(
+                                                    "Open a local .torrent file",
+                                                    "Buka berkas .torrent lokal",
+                                                ))
                                                 .clicked()
                                             {
                                                 self.open_torrent_file_picker(&snap.settings);
                                             }
 
-                                            if brand_cta_button(ui, "Start", Some(VectorIcon::Plus), p).clicked() {
+                                            if brand_cta_button(
+                                                ui,
+                                                lang.tr("Start", "Mulai"),
+                                                Some(VectorIcon::Plus),
+                                                p,
+                                            )
+                                            .clicked()
+                                            {
                                                 if self.quick_url_input.trim().is_empty() {
                                                     self.open_add_modal(&snap.settings, None);
                                                 } else {
@@ -1750,8 +2034,11 @@ impl VortexApp {
                             hero_feature_card(
                                 &mut cols[0],
                                 "1",
-                                "Dynamic HTTP Segments",
-                                "Splits transfers up to 32 parallel byte-range streams and steals work from slow chunks.",
+                                lang.tr("Dynamic HTTP Segments", "Segmen HTTP Dinamis"),
+                                lang.tr(
+                                    "Splits transfers up to 32 parallel byte-range streams and steals work from slow chunks.",
+                                    "Membagi unduhan hingga 32 aliran paralel serta mempercepat potongan lambat secara otomatis.",
+                                ),
                                 "If-Range + SHA-256",
                                 p,
                             );
@@ -1759,15 +2046,21 @@ impl VortexApp {
                                 &mut cols[1],
                                 "2",
                                 "BitTorrent & Magnet",
-                                "Native Rust swarm engine with Kademlia DHT, HTTP/UDP trackers, uTP, and fast-resume.",
+                                lang.tr(
+                                    "Native Rust swarm engine with Kademlia DHT, HTTP/UDP trackers, uTP, and fast-resume.",
+                                    "Mesin swarm Rust asli dengan Kademlia DHT, pelacak HTTP/UDP, uTP, dan fast-resume.",
+                                ),
                                 "magnet:? + .torrent",
                                 p,
                             );
                             hero_feature_card(
                                 &mut cols[2],
                                 "3",
-                                "Native Tray Flyout",
-                                "Runs silently in your Windows tray with live popup controls and instant bandwidth caps.",
+                                lang.tr("Native Tray Flyout", "Flyout Baki Sistem"),
+                                lang.tr(
+                                    "Runs silently in your Windows tray with live popup controls and instant bandwidth caps.",
+                                    "Berjalan senyap di baki Windows dengan kontrol cepat dan batas kecepatan instan.",
+                                ),
                                 "vortexdm --minimized",
                                 p,
                             );
@@ -1778,7 +2071,13 @@ impl VortexApp {
         });
     }
 
-    fn render_download_card(&mut self, ui: &mut egui::Ui, item: &DownloadItem, p: &Palette) {
+    fn render_download_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        item: &DownloadItem,
+        lang: Language,
+        p: &Palette,
+    ) {
         let is_selected = self.selected_id == Some(item.id);
         let is_checked = self.checked_ids.contains(&item.id);
         let accent = p.status_color(item.status);
@@ -1822,9 +2121,12 @@ impl VortexApp {
                         ui.add_space(9.0);
                         let cb_resp = custom_checkbox(ui, is_checked, false, p).on_hover_text(
                             if is_checked {
-                                "Deselect download"
+                                lang.tr("Deselect download", "Batal pilih unduhan")
                             } else {
-                                "Select for bulk delete / pause / resume"
+                                lang.tr(
+                                    "Select for bulk delete / pause / resume",
+                                    "Pilih untuk hapus / jeda / lanjut massal",
+                                )
                             },
                         );
                         cb_hovered = cb_resp.hovered();
@@ -1854,7 +2156,7 @@ impl VortexApp {
 
                             // Build status/metadata pills upfront so we can size filename accurately
                             let mut pills: Vec<(String, Color32)> = Vec::with_capacity(4);
-                            pills.push((item.status.label().to_uppercase(), accent));
+                            pills.push((item.status.label_tr(lang).to_uppercase(), accent));
                             if let Some(tor) = &item.torrent {
                                 pills.push(("TORRENT".to_string(), p.teal));
                                 if tor.seeding {
@@ -1871,9 +2173,15 @@ impl VortexApp {
                             }
                             if let Some(ok) = item.sha256_verified {
                                 if ok {
-                                    pills.push(("SHA-256 OK".to_string(), p.success));
+                                    pills.push((
+                                        lang.tr("SHA-256 OK", "SHA-256 COCOK").to_string(),
+                                        p.success,
+                                    ));
                                 } else {
-                                    pills.push(("HASH MISMATCH".to_string(), p.danger));
+                                    pills.push((
+                                        lang.tr("HASH MISMATCH", "HASH TIDAK COCOK").to_string(),
+                                        p.danger,
+                                    ));
                                 }
                             }
 
@@ -1960,7 +2268,7 @@ impl VortexApp {
                                     let trash_resp = square_icon_button(
                                         ui,
                                         VectorIcon::Trash,
-                                        "Delete download...",
+                                        lang.tr("Delete download...", "Hapus unduhan..."),
                                         p,
                                         btn_size,
                                     );
@@ -1988,9 +2296,12 @@ impl VortexApp {
                                         ui,
                                         VectorIcon::Inspect,
                                         if is_selected {
-                                            "Hide Inspector"
+                                            lang.tr("Hide Inspector", "Tutup Inspektor")
                                         } else {
-                                            "Inspect Segments & Details"
+                                            lang.tr(
+                                                "Inspect Segments & Details",
+                                                "Periksa Segmen & Detail",
+                                            )
                                         },
                                         p,
                                         btn_size,
@@ -2014,7 +2325,7 @@ impl VortexApp {
                                             let r = square_icon_button(
                                                 ui,
                                                 VectorIcon::Pause,
-                                                "Pause seeding",
+                                                lang.tr("Pause seeding", "Jeda seeding"),
                                                 p,
                                                 btn_size,
                                             );
@@ -2029,7 +2340,10 @@ impl VortexApp {
                                         let folder_r = square_icon_button(
                                             ui,
                                             VectorIcon::Folder,
-                                            "Reveal in Windows Explorer",
+                                            lang.tr(
+                                                "Reveal in Windows Explorer",
+                                                "Tampilkan di Windows Explorer",
+                                            ),
                                             p,
                                             btn_size,
                                         );
@@ -2048,7 +2362,7 @@ impl VortexApp {
                                             let open_r = square_icon_button(
                                                 ui,
                                                 VectorIcon::OpenExternal,
-                                                "Open downloaded file",
+                                                lang.tr("Open downloaded file", "Buka berkas"),
                                                 p,
                                                 btn_size,
                                             );
@@ -2069,7 +2383,7 @@ impl VortexApp {
                                         let pause_r = square_icon_button(
                                             ui,
                                             VectorIcon::Pause,
-                                            "Pause download",
+                                            lang.tr("Pause download", "Jeda unduhan"),
                                             p,
                                             btn_size,
                                         );
@@ -2079,7 +2393,10 @@ impl VortexApp {
                                         if pause_r.clicked() {
                                             any_action_interacted = true;
                                             self.engine.send(EngineCommand::Pause(item.id));
-                                            self.notify("Download paused");
+                                            self.notify(lang.tr(
+                                                "Download paused",
+                                                "Unduhan dijeda",
+                                            ));
                                         }
                                     } else if matches!(
                                         item.status,
@@ -2090,7 +2407,7 @@ impl VortexApp {
                                         let play_r = square_icon_button(
                                             ui,
                                             VectorIcon::Play,
-                                            "Resume download",
+                                            lang.tr("Resume download", "Lanjutkan unduhan"),
                                             p,
                                             btn_size,
                                         );
@@ -2100,7 +2417,10 @@ impl VortexApp {
                                         if play_r.clicked() {
                                             any_action_interacted = true;
                                             self.engine.send(EngineCommand::Resume(item.id));
-                                            self.notify("Download resumed");
+                                            self.notify(lang.tr(
+                                                "Download resumed",
+                                                "Unduhan dilanjutkan",
+                                            ));
                                         }
                                     }
                                 });
@@ -2142,8 +2462,9 @@ impl VortexApp {
                                     ),
                                     None => {
                                         format!(
-                                            "{} / Unknown size",
-                                            format_bytes(item.downloaded_bytes)
+                                            "{} / {}",
+                                            format_bytes(item.downloaded_bytes),
+                                            lang.tr("Unknown size", "Ukuran tidak diketahui")
                                         )
                                     }
                                 };
@@ -2177,8 +2498,11 @@ impl VortexApp {
                                         ui.label(sep());
                                         ui.label(
                                             RichText::new(format!(
-                                                "{} peers ({}S/{}L)",
-                                                tor.peers_live, tor.peers_seeders, leechers
+                                                "{} {} ({}S/{}L)",
+                                                tor.peers_live,
+                                                lang.tr("peers", "peer"),
+                                                tor.peers_seeders,
+                                                leechers
                                             ))
                                             .font(mono_font(10.5))
                                             .color(p.info),
@@ -2204,9 +2528,10 @@ impl VortexApp {
                                     } else if item.status == DownloadStatus::Probing {
                                         ui.label(sep());
                                         ui.label(
-                                            RichText::new(
+                                            RichText::new(lang.tr(
                                                 "Discovering DHT/tracker peers & fetching metadata...",
-                                            )
+                                                "Mencari peer DHT/tracker & mengambil metadata...",
+                                            ))
                                             .font(mono_font(10.8))
                                             .color(p.teal),
                                         );
@@ -2215,7 +2540,8 @@ impl VortexApp {
                                             ui.label(sep());
                                             ui.label(
                                                 RichText::new(format!(
-                                                    "Finished {}",
+                                                    "{} {}",
+                                                    lang.tr("Finished", "Selesai"),
                                                     done_at
                                                         .with_timezone(&chrono::Local)
                                                         .format("%H:%M:%S")
@@ -2244,8 +2570,9 @@ impl VortexApp {
                                     ui.label(sep());
                                     ui.label(
                                         RichText::new(format!(
-                                            "{} sockets",
-                                            item.active_connections
+                                            "{} {}",
+                                            item.active_connections,
+                                            lang.tr("sockets", "soket")
                                         ))
                                         .font(mono_font(10.8))
                                         .color(p.info),
@@ -2262,7 +2589,8 @@ impl VortexApp {
                                         ui.label(sep());
                                         ui.label(
                                             RichText::new(format!(
-                                                "Finished {}",
+                                                "{} {}",
+                                                lang.tr("Finished", "Selesai"),
                                                 done_at
                                                     .with_timezone(&chrono::Local)
                                                     .format("%H:%M:%S")
@@ -2293,6 +2621,7 @@ impl VortexApp {
             && !self.add_modal.open
             && !self.settings_open
             && self.delete_confirm.is_none()
+            && !self.clear_completed_confirm
             && frame_resp.response.hovered()
             && ui.input(|i| i.pointer.primary_clicked())
         {
@@ -2302,7 +2631,13 @@ impl VortexApp {
     }
 
     /// 9Router macOS/Terminal-style bottom Inspector with 3 colored dots, monospace header, and code chips.
-    fn render_inspector(&mut self, ui: &mut egui::Ui, item: &DownloadItem, p: &Palette) {
+    fn render_inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        item: &DownloadItem,
+        lang: Language,
+        p: &Palette,
+    ) {
         egui::Frame::new()
             .fill(p.surface)
             .corner_radius(CornerRadius::same(12))
@@ -2320,7 +2655,11 @@ impl VortexApp {
                     ui.painter().circle_filled(Pos2::new(dots_rect.min.x + 21.0, cy), 4.5, p.warning);
                     ui.painter().circle_filled(Pos2::new(dots_rect.min.x + 36.0, cy), 4.5, p.success);
 
-                    let title_str = format!("inspector — {}", item.filename);
+                    let title_str = format!(
+                        "{} — {}",
+                        lang.tr("inspector", "inspektor"),
+                        item.filename
+                    );
                     let max_title_w = (bar_w - 460.0).max(90.0);
                     let nat_title_w = ui
                         .painter()
@@ -2354,32 +2693,36 @@ impl VortexApp {
                         &mut self.inspector_tab,
                         InspectorTab::Segments,
                         if item.is_torrent() {
-                            "Swarm & Files"
+                            lang.tr("Swarm & Files", "Swarm & Berkas")
                         } else {
-                            "Segments & Speed"
+                            lang.tr("Segments & Speed", "Segmen & Kecepatan")
                         },
                     );
                     ui.selectable_value(
                         &mut self.inspector_tab,
                         InspectorTab::Details,
                         if item.is_torrent() {
-                            "Infohash & Details"
+                            lang.tr("Infohash & Details", "Infohash & Detail")
                         } else {
                             "Metadata & SHA-256"
                         },
                     );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Close").clicked() {
+                        if ui.small_button(lang.tr("Close", "Tutup")).clicked() {
                             self.selected_id = None;
                         }
                         if ui
-                            .small_button("Delete + Files")
-                            .on_hover_text("Stop transfer, remove from list, AND delete files from disk")
+                            .small_button(lang.tr("Delete + Files", "Hapus + Berkas"))
+                            .on_hover_text(lang.tr(
+                                "Stop transfer, remove from list, AND delete files from disk",
+                                "Hentikan transfer, hapus dari daftar, DAN hapus berkas dari disk",
+                            ))
                             .clicked()
                         {
                             self.add_modal.open = false;
                             self.settings_open = false;
+                            self.clear_completed_confirm = false;
                             self.delete_confirm = Some(DeleteConfirmState {
                                 items: vec![DeleteConfirmItem {
                                     id: item.id,
@@ -2403,35 +2746,61 @@ impl VortexApp {
                             ui.columns(2, |cols| {
                                 cols[0].horizontal(|ui| {
                                     ui.label(
-                                        RichText::new("BITTORRENT SWARM & FILES")
-                                            .font(bold_font(10.5))
-                                            .color(p.text_subtle),
+                                        RichText::new(lang.tr(
+                                            "BITTORRENT SWARM & FILES",
+                                            "SWARM & BERKAS BITTORRENT",
+                                        ))
+                                        .font(bold_font(10.5))
+                                        .color(p.text_subtle),
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         if item.status == DownloadStatus::Downloading {
                                             let refresh_tip = match tor.last_swarm_refresh_at {
                                                 Some(ts) => format!(
-                                                    "Auto-refresh active (last refreshed {}) — click to refresh peers/trackers now",
-                                                    ts.with_timezone(&chrono::Local).format("%H:%M:%S")
+                                                    "{} ({}) — {}",
+                                                    lang.tr(
+                                                        "Auto-refresh active (last refreshed",
+                                                        "Pembaruan otomatis aktif (terakhir",
+                                                    ),
+                                                    ts.with_timezone(&chrono::Local).format("%H:%M:%S"),
+                                                    lang.tr(
+                                                        "click to refresh peers/trackers now",
+                                                        "klik untuk menyegarkan peer/tracker sekarang",
+                                                    ),
                                                 ),
-                                                None => "Auto-refresh active — click to refresh peers/trackers now".to_string(),
+                                                None => lang
+                                                    .tr(
+                                                        "Auto-refresh active — click to refresh peers/trackers now",
+                                                        "Pembaruan otomatis aktif — klik untuk menyegarkan peer/tracker sekarang",
+                                                    )
+                                                    .to_string(),
                                             };
-                                            if preset_chip(ui, "Refresh Peers", false, p)
-                                                .on_hover_text(refresh_tip)
-                                                .clicked()
+                                            if preset_chip(
+                                                ui,
+                                                lang.tr("Refresh Peers", "Segarkan Peer"),
+                                                false,
+                                                p,
+                                            )
+                                            .on_hover_text(refresh_tip)
+                                            .clicked()
                                             {
                                                 self.engine.send(EngineCommand::RefreshTorrentPeers(item.id));
-                                                self.notify("Refreshing torrent peers & trackers...");
+                                                self.notify(lang.tr(
+                                                    "Refreshing torrent peers & trackers...",
+                                                    "Menyegarkan peer & tracker torrent...",
+                                                ));
                                             }
                                         }
                                         ui.label(
                                             RichText::new(format!(
-                                                "{} live ({}S/{}L, {} uTP) • {} seen • UL {}",
+                                                "{} {} ({}S/{}L, {} uTP) • {} {} • UL {}",
                                                 tor.peers_live,
+                                                lang.tr("live", "aktif"),
                                                 tor.peers_seeders,
                                                 tor.peers_leechers,
                                                 tor.peers_utp,
                                                 tor.peers_seen,
+                                                lang.tr("seen", "ditemukan"),
                                                 format_bytes(tor.uploaded_bytes)
                                             ))
                                             .font(mono_font(10.5))
@@ -2446,9 +2815,10 @@ impl VortexApp {
                                     .show(&mut cols[0], |ui| {
                                         if tor.files.is_empty() {
                                             ui.label(
-                                                RichText::new(
+                                                RichText::new(lang.tr(
                                                     "Resolving torrent file tree from peers via BEP-9 ut_metadata...",
-                                                )
+                                                    "Mengambil struktur berkas torrent dari peer via BEP-9 ut_metadata...",
+                                                ))
                                                 .font(mono_font(11.0))
                                                 .color(p.text_muted),
                                             );
@@ -2457,9 +2827,21 @@ impl VortexApp {
                                                 .striped(true)
                                                 .spacing([12.0, 4.0])
                                                 .show(ui, |ui| {
-                                                    ui.label(RichText::new("FILE").font(bold_font(10.0)).color(p.text_subtle));
-                                                    ui.label(RichText::new("SIZE").font(bold_font(10.0)).color(p.text_subtle));
-                                                    ui.label(RichText::new("DONE").font(bold_font(10.0)).color(p.text_subtle));
+                                                    ui.label(
+                                                        RichText::new(lang.tr("FILE", "BERKAS"))
+                                                            .font(bold_font(10.0))
+                                                            .color(p.text_subtle),
+                                                    );
+                                                    ui.label(
+                                                        RichText::new(lang.tr("SIZE", "UKURAN"))
+                                                            .font(bold_font(10.0))
+                                                            .color(p.text_subtle),
+                                                    );
+                                                    ui.label(
+                                                        RichText::new(lang.tr("DONE", "SELESAI"))
+                                                            .font(bold_font(10.0))
+                                                            .color(p.text_subtle),
+                                                    );
                                                     ui.end_row();
                                                     let file_col_w = (ui.available_width() - 120.0).max(110.0);
                                                     for f in &tor.files {
@@ -2497,9 +2879,12 @@ impl VortexApp {
 
                                 cols[1].horizontal(|ui| {
                                     ui.label(
-                                        RichText::new("SWARM THROUGHPUT")
-                                            .font(bold_font(10.5))
-                                            .color(p.text_subtle),
+                                        RichText::new(lang.tr(
+                                            "SWARM THROUGHPUT",
+                                            "KECEPATAN SWARM",
+                                        ))
+                                        .font(bold_font(10.5))
+                                        .color(p.text_subtle),
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(
@@ -2521,15 +2906,22 @@ impl VortexApp {
                         ui.columns(2, |cols| {
                             cols[0].horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("DYNAMIC SEGMENTATION MAP")
-                                        .font(bold_font(10.5))
-                                        .color(p.text_subtle),
+                                    RichText::new(lang.tr(
+                                        "DYNAMIC SEGMENTATION MAP",
+                                        "PETA SEGMENTASI DINAMIS",
+                                    ))
+                                    .font(bold_font(10.5))
+                                    .color(p.text_subtle),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
-                                        RichText::new(format!("{} segments", item.segments.len()))
-                                            .font(mono_font(11.0))
-                                            .color(p.brand),
+                                        RichText::new(format!(
+                                            "{} {}",
+                                            item.segments.len(),
+                                            lang.tr("segments", "segmen")
+                                        ))
+                                        .font(mono_font(11.0))
+                                        .color(p.brand),
                                     );
                                 });
                             });
@@ -2543,9 +2935,15 @@ impl VortexApp {
                                     if item.segments.is_empty() {
                                         ui.label(
                                             RichText::new(if item.supports_ranges {
-                                                "Waiting to partition dynamic byte ranges..."
+                                                lang.tr(
+                                                    "Waiting to partition dynamic byte ranges...",
+                                                    "Menunggu pembagian rentang byte dinamis...",
+                                                )
                                             } else {
-                                                "Single-stream transfer (server does not expose byte ranges)"
+                                                lang.tr(
+                                                    "Single-stream transfer (server does not expose byte ranges)",
+                                                    "Transfer aliran tunggal (server tidak mendukung rentang byte)",
+                                                )
                                             })
                                             .font(mono_font(11.0))
                                             .color(p.text_muted),
@@ -2556,9 +2954,21 @@ impl VortexApp {
                                             .spacing([14.0, 4.0])
                                             .show(ui, |ui| {
                                                 ui.label(RichText::new("SEG").font(bold_font(10.0)).color(p.text_subtle));
-                                                ui.label(RichText::new("BYTE RANGE").font(bold_font(10.0)).color(p.text_subtle));
-                                                ui.label(RichText::new("DONE").font(bold_font(10.0)).color(p.text_subtle));
-                                                ui.label(RichText::new("STATE").font(bold_font(10.0)).color(p.text_subtle));
+                                                ui.label(
+                                                    RichText::new(lang.tr("BYTE RANGE", "RENTANG BYTE"))
+                                                        .font(bold_font(10.0))
+                                                        .color(p.text_subtle),
+                                                );
+                                                ui.label(
+                                                    RichText::new(lang.tr("DONE", "SELESAI"))
+                                                        .font(bold_font(10.0))
+                                                        .color(p.text_subtle),
+                                                );
+                                                ui.label(
+                                                    RichText::new(lang.tr("STATE", "STATUS"))
+                                                        .font(bold_font(10.0))
+                                                        .color(p.text_subtle),
+                                                );
                                                 ui.end_row();
 
                                                 for seg in &item.segments {
@@ -2583,8 +2993,22 @@ impl VortexApp {
                                                         SegmentStatus::Idle => p.warning,
                                                         SegmentStatus::Failed => p.danger,
                                                     };
+                                                    let seg_lbl = match seg.status {
+                                                        SegmentStatus::Completed => {
+                                                            lang.tr("Completed", "Selesai")
+                                                        }
+                                                        SegmentStatus::Active => {
+                                                            lang.tr("Active", "Aktif")
+                                                        }
+                                                        SegmentStatus::Idle => {
+                                                            lang.tr("Idle", "Menganggur")
+                                                        }
+                                                        SegmentStatus::Failed => {
+                                                            lang.tr("Failed", "Gagal")
+                                                        }
+                                                    };
                                                     ui.label(
-                                                        RichText::new(format!("{:?}", seg.status))
+                                                        RichText::new(seg_lbl)
                                                             .font(mono_font(11.0))
                                                             .color(st_col),
                                                     );
@@ -2597,20 +3021,31 @@ impl VortexApp {
                             // Right column: Live EWMA sparkline
                             cols[1].horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("EWMA SPEED TELEMETRY")
-                                        .font(bold_font(10.5))
-                                        .color(p.text_subtle),
+                                    RichText::new(lang.tr(
+                                        "EWMA SPEED TELEMETRY",
+                                        "TELEMETRI KECEPATAN EWMA",
+                                    ))
+                                    .font(bold_font(10.5))
+                                    .color(p.text_subtle),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
-                                        RichText::new(format!("Peak {}", format_speed(item.peak_speed_bps)))
-                                            .font(mono_font(11.0))
-                                            .color(p.success),
+                                        RichText::new(format!(
+                                            "{} {}",
+                                            lang.tr("Peak", "Puncak"),
+                                            format_speed(item.peak_speed_bps)
+                                        ))
+                                        .font(mono_font(11.0))
+                                        .color(p.success),
                                     );
                                     ui.label(
-                                        RichText::new(format!("Now {}", format_speed(item.speed_bps)))
-                                            .font(mono_font(11.0))
-                                            .color(p.brand),
+                                        RichText::new(format!(
+                                            "{} {}",
+                                            lang.tr("Now", "Kini"),
+                                            format_speed(item.speed_bps)
+                                        ))
+                                        .font(mono_font(11.0))
+                                        .color(p.brand),
                                     );
                                 });
                             });
@@ -2625,7 +3060,15 @@ impl VortexApp {
                                 .num_columns(2)
                                 .spacing([14.0, 6.0])
                                 .show(ui, |ui| {
-                                    ui.label(RichText::new(if item.is_torrent() { "Magnet / Source" } else { "Source URL" }).font(bold_font(11.5)).color(p.text_muted));
+                                    ui.label(
+                                        RichText::new(if item.is_torrent() {
+                                            lang.tr("Magnet / Source", "Magnet / Sumber")
+                                        } else {
+                                            lang.tr("Source URL", "URL Sumber")
+                                        })
+                                        .font(bold_font(11.5))
+                                        .color(p.text_muted),
+                                    );
                                     ui.horizontal(|ui| {
                                         let short_u = if item.url.len() > 82 {
                                             format!("{}...", &item.url[..82])
@@ -2633,7 +3076,7 @@ impl VortexApp {
                                             item.url.clone()
                                         };
                                         code_chip(ui, &short_u, p.info, p);
-                                        if ui.small_button("Copy").clicked() {
+                                        if ui.small_button(lang.tr("Copy", "Salin")).clicked() {
                                             if let Ok(mut cb) = arboard::Clipboard::new() {
                                                 let _ = cb.set_text(item.url.clone());
                                             }
@@ -2641,7 +3084,11 @@ impl VortexApp {
                                     });
                                     ui.end_row();
 
-                                    ui.label(RichText::new("Save Path").font(bold_font(11.5)).color(p.text_muted));
+                                    ui.label(
+                                        RichText::new(lang.tr("Save Path", "Lokasi Simpan"))
+                                            .font(bold_font(11.5))
+                                            .color(p.text_muted),
+                                    );
                                     ui.horizontal(|ui| {
                                         let p_display = if item.is_torrent() {
                                             item.save_dir.display().to_string()
@@ -2649,7 +3096,7 @@ impl VortexApp {
                                             item.target_path().display().to_string()
                                         };
                                         code_chip(ui, &p_display, p.text_main, p);
-                                        if ui.small_button("Reveal").clicked() {
+                                        if ui.small_button(lang.tr("Reveal", "Tampilkan")).clicked() {
                                             if item.is_torrent() {
                                                 platform::open_folder(&item.save_dir);
                                             } else {
@@ -2662,10 +3109,13 @@ impl VortexApp {
                                     if let Some(tor) = &item.torrent {
                                         ui.label(RichText::new("Infohash (SHA-1)").font(bold_font(11.5)).color(p.text_muted));
                                         ui.horizontal(|ui| {
-                                            let hash = tor.info_hash.as_deref().unwrap_or("Resolving...");
+                                            let hash = tor.info_hash.as_deref().unwrap_or(
+                                                lang.tr("Resolving...", "Memproses..."),
+                                            );
                                             code_chip(ui, hash, p.teal, p);
                                             if let Some(h) = &tor.info_hash {
-                                                if ui.small_button("Copy").clicked() {
+                                                if ui.small_button(lang.tr("Copy", "Salin")).clicked()
+                                                {
                                                     if let Ok(mut cb) = arboard::Clipboard::new() {
                                                         let _ = cb.set_text(h.clone());
                                                     }
@@ -2674,7 +3124,11 @@ impl VortexApp {
                                         });
                                         ui.end_row();
 
-                                        ui.label(RichText::new("Swarm Protocol").font(bold_font(11.5)).color(p.text_muted));
+                                        ui.label(
+                                            RichText::new(lang.tr("Swarm Protocol", "Protokol Swarm"))
+                                                .font(bold_font(11.5))
+                                                .color(p.text_muted),
+                                        );
                                         code_chip(
                                             ui,
                                             "BitTorrent v1 (BEP-3) • Kademlia DHT (BEP-5) • Magnet ut_metadata (BEP-9) • uTP",
@@ -2683,7 +3137,11 @@ impl VortexApp {
                                         );
                                         ui.end_row();
                                     } else {
-                                    ui.label(RichText::new("HTTP Headers").font(bold_font(11.5)).color(p.text_muted));
+                                    ui.label(
+                                        RichText::new(lang.tr("HTTP Headers", "Header HTTP"))
+                                            .font(bold_font(11.5))
+                                            .color(p.text_muted),
+                                    );
                                     code_chip(
                                         ui,
                                         &format!(
@@ -2706,7 +3164,8 @@ impl VortexApp {
                                                     None => p.brand,
                                                 };
                                                 code_chip(ui, h, col, p);
-                                                if ui.small_button("Copy").clicked() {
+                                                if ui.small_button(lang.tr("Copy", "Salin")).clicked()
+                                                {
                                                     if let Ok(mut cb) = arboard::Clipboard::new() {
                                                         let _ = cb.set_text(h.clone());
                                                     }
@@ -2714,26 +3173,46 @@ impl VortexApp {
                                             }
                                             None => {
                                                 ui.label(
-                                                    RichText::new("Not computed yet")
-                                                        .font(mono_font(11.5))
-                                                        .color(p.text_subtle),
+                                                    RichText::new(lang.tr(
+                                                        "Not computed yet",
+                                                        "Belum dihitung",
+                                                    ))
+                                                    .font(mono_font(11.5))
+                                                    .color(p.text_subtle),
                                                 );
                                             }
                                         }
                                     });
                                     ui.end_row();
 
-                                    ui.label(RichText::new("Verify Hash").font(bold_font(11.5)).color(p.text_muted));
+                                    ui.label(
+                                        RichText::new(lang.tr("Verify Hash", "Verifikasi Hash"))
+                                            .font(bold_font(11.5))
+                                            .color(p.text_muted),
+                                    );
                                     ui.horizontal(|ui| {
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.verify_hash_input)
                                                 .font(mono_font(11.5))
-                                                .hint_text("Optional expected 64-char SHA-256 hex...")
+                                                .hint_text(
+                                                    RichText::new(lang.tr(
+                                                        "Optional expected 64-char SHA-256 hex...",
+                                                        "Opsional hex SHA-256 64 karakter...",
+                                                    ))
+                                                    .color(p.text_subtle),
+                                                )
                                                 .desired_width(350.0),
                                         );
                                         let can_verify = item.status == DownloadStatus::Completed;
                                         ui.add_enabled_ui(can_verify, |ui| {
-                                            if brand_cta_button(ui, "Verify SHA-256", Some(VectorIcon::Shield), p).clicked() {
+                                            if brand_cta_button(
+                                                ui,
+                                                lang.tr("Verify SHA-256", "Verifikasi SHA-256"),
+                                                Some(VectorIcon::Shield),
+                                                p,
+                                            )
+                                            .clicked()
+                                            {
                                                 let exp = if self.verify_hash_input.trim().is_empty() {
                                                     None
                                                 } else {
@@ -2755,7 +3234,8 @@ impl VortexApp {
             });
     }
 
-    fn render_add_modal(&mut self, ctx: &egui::Context, _snap: &EngineSnapshot, p: &Palette) {
+    fn render_add_modal(&mut self, ctx: &egui::Context, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         let mut cancel_clicked = paint_modal_scrim(ctx, "vortex_add_scrim", p);
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             cancel_clicked = true;
@@ -2791,14 +3271,20 @@ impl VortexApp {
                     },
                     accent,
                     if is_torrent {
-                        "Confirm Torrent Download"
+                        lang.tr("Confirm Torrent Download", "Konfirmasi Unduhan Torrent")
                     } else {
-                        "New Download / Torrent"
+                        lang.tr("New Download / Torrent", "Unduhan Baru / Torrent")
                     },
                     if is_torrent {
-                        "Review destination folder and confirm to start BitTorrent swarm"
+                        lang.tr(
+                            "Review destination folder and confirm to start BitTorrent swarm",
+                            "Periksa folder tujuan dan konfirmasi untuk memulai swarm BitTorrent",
+                        )
                     } else {
-                        "Add an HTTP/HTTPS stream, magnet:? link, or local .torrent file"
+                        lang.tr(
+                            "Add an HTTP/HTTPS stream, magnet:? link, or local .torrent file",
+                            "Tambahkan tautan HTTP/HTTPS, magnet:?, atau berkas .torrent lokal",
+                        )
                     },
                     Some((
                         if is_torrent { "BITTORRENT" } else { "HTTP / P2P" },
@@ -2824,7 +3310,10 @@ impl VortexApp {
                                 // Card 1: Source URL / Magnet / .torrent
                                 modal_section_card(
                                     ui,
-                                    "SOURCE LINK OR TORRENT FILE",
+                                    lang.tr(
+                                        "SOURCE LINK OR TORRENT FILE",
+                                        "TAUTAN SUMBER ATAU BERKAS TORRENT",
+                                    ),
                                     accent,
                                     p,
                                     |ui| {
@@ -2833,7 +3322,10 @@ impl VortexApp {
                                         let url_resp = styled_text_field(
                                             ui,
                                             &mut self.add_modal.url,
-                                            "https://example.com/archive.zip  or  magnet:?xt=urn:btih:...",
+                                            lang.tr(
+                                                "https://example.com/archive.zip  or  magnet:?xt=urn:btih:...",
+                                                "https://contoh.com/arsip.zip  atau  magnet:?xt=urn:btih:...",
+                                            ),
                                             true,
                                             url_w,
                                             p,
@@ -2847,9 +3339,17 @@ impl VortexApp {
                                         // Action strip: Paste / Open .torrent / Probe Headers
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 6.0;
-                                            if secondary_button(ui, "Paste", Some(VectorIcon::Link), p)
-                                                .on_hover_text("Paste URL or magnet link from clipboard")
-                                                .clicked()
+                                            if secondary_button(
+                                                ui,
+                                                lang.tr("Paste", "Tempel"),
+                                                Some(VectorIcon::Link),
+                                                p,
+                                            )
+                                            .on_hover_text(lang.tr(
+                                                "Paste URL or magnet link from clipboard",
+                                                "Tempel URL atau tautan magnet dari papan klip",
+                                            ))
+                                            .clicked()
                                             {
                                                 if let Ok(mut cb) = arboard::Clipboard::new() {
                                                     if let Ok(txt) = cb.get_text() {
@@ -2859,15 +3359,24 @@ impl VortexApp {
                                             }
                                             if secondary_button(
                                                 ui,
-                                                "Open .torrent",
+                                                lang.tr("Open .torrent", "Buka .torrent"),
                                                 Some(VectorIcon::Magnet),
                                                 p,
                                             )
-                                            .on_hover_text("Pick a local .torrent file from disk")
+                                            .on_hover_text(lang.tr(
+                                                "Pick a local .torrent file from disk",
+                                                "Pilih berkas .torrent lokal dari disk",
+                                            ))
                                             .clicked()
                                             {
                                                 if let Some(path) = rfd::FileDialog::new()
-                                                    .add_filter("BitTorrent Files", &["torrent"])
+                                                    .add_filter(
+                                                        lang.tr(
+                                                            "BitTorrent Files",
+                                                            "Berkas BitTorrent",
+                                                        ),
+                                                        &["torrent"],
+                                                    )
                                                     .pick_file()
                                                 {
                                                     self.add_modal.url = path.display().to_string();
@@ -2877,13 +3386,14 @@ impl VortexApp {
                                                 ui.add_enabled_ui(!self.add_modal.probing, |ui| {
                                                     if secondary_button(
                                                         ui,
-                                                        "Probe",
+                                                        lang.tr("Probe", "Periksa"),
                                                         Some(VectorIcon::Speed),
                                                         p,
                                                     )
-                                                    .on_hover_text(
+                                                    .on_hover_text(lang.tr(
                                                         "Inspect file size, filename, and byte-range resume support",
-                                                    )
+                                                        "Periksa ukuran berkas, nama berkas, dan dukungan lanjut unduhan",
+                                                    ))
                                                     .clicked()
                                                     {
                                                         trigger_probe = true;
@@ -2895,8 +3405,13 @@ impl VortexApp {
                                                 ui.with_layout(
                                                     Layout::right_to_left(Align::Center),
                                                     |ui| {
-                                                        if preset_chip(ui, "Clear", false, p)
-                                                            .clicked()
+                                                        if preset_chip(
+                                                            ui,
+                                                            lang.tr("Clear", "Hapus"),
+                                                            false,
+                                                            p,
+                                                        )
+                                                        .clicked()
                                                         {
                                                             self.add_modal.url.clear();
                                                             self.add_modal.probe_result = None;
@@ -2972,9 +3487,10 @@ impl VortexApp {
                                                             );
                                                         });
                                                         ui.label(
-                                                            RichText::new(
+                                                            RichText::new(lang.tr(
                                                                 "BitTorrent Swarm  •  Kademlia DHT + Trackers + Auto Piece Verification",
-                                                            )
+                                                                "Swarm BitTorrent  •  Kademlia DHT + Tracker + Verifikasi Otomatis",
+                                                            ))
                                                             .font(body_font(10.5))
                                                             .color(p.teal),
                                                         );
@@ -2997,9 +3513,10 @@ impl VortexApp {
                                                     ui.horizontal(|ui| {
                                                         ui.spinner();
                                                         ui.label(
-                                                            RichText::new(
+                                                            RichText::new(lang.tr(
                                                                 "Probing remote HTTP headers...",
-                                                            )
+                                                                "Memeriksa header HTTP...",
+                                                            ))
                                                             .font(mono_font(11.2))
                                                             .color(p.brand),
                                                         );
@@ -3026,11 +3543,16 @@ impl VortexApp {
                                                                     .total_bytes
                                                                     .map(format_bytes)
                                                                     .unwrap_or_else(|| {
-                                                                        "Unknown size".to_string()
+                                                                        lang.tr(
+                                                                            "Unknown size",
+                                                                            "Ukuran tidak diketahui",
+                                                                        )
+                                                                        .to_string()
                                                                     });
                                                                 ui.label(
                                                                     RichText::new(format!(
-                                                                        "Size: {}",
+                                                                        "{} {}",
+                                                                        lang.tr("Size:", "Ukuran:"),
                                                                         sz
                                                                     ))
                                                                     .font(bold_font(11.5))
@@ -3043,9 +3565,15 @@ impl VortexApp {
                                                                 ui.label(
                                                                     RichText::new(
                                                                         if info.supports_ranges {
-                                                                            "Multi-Segment & Resume Supported"
+                                                                            lang.tr(
+                                                                                "Multi-Segment & Resume Supported",
+                                                                                "Multi-Segmen & Lanjut Otomatis Didukung",
+                                                                            )
                                                                         } else {
-                                                                            "Single-Stream Only"
+                                                                            lang.tr(
+                                                                                "Single-Stream Only",
+                                                                                "Hanya Aliran Tunggal",
+                                                                            )
                                                                         },
                                                                     )
                                                                     .font(body_font(11.5))
@@ -3074,7 +3602,11 @@ impl VortexApp {
                                                             ui.set_width(ui.available_width());
                                                             ui.label(
                                                                 RichText::new(format!(
-                                                                    "Probe error: {}",
+                                                                    "{} {}",
+                                                                    lang.tr(
+                                                                        "Probe error:",
+                                                                        "Gagal memeriksa:",
+                                                                    ),
                                                                     e
                                                                 ))
                                                                 .font(body_font(11.2))
@@ -3091,9 +3623,12 @@ impl VortexApp {
                                 modal_section_card(
                                     ui,
                                     if is_torrent {
-                                        "DESTINATION FOLDER"
+                                        lang.tr("DESTINATION FOLDER", "FOLDER TUJUAN")
                                     } else {
-                                        "DESTINATION & TRANSFER OPTIONS"
+                                        lang.tr(
+                                            "DESTINATION & TRANSFER OPTIONS",
+                                            "TUJUAN & OPSI TRANSFER",
+                                        )
                                     },
                                     p.brand,
                                     p,
@@ -3101,7 +3636,12 @@ impl VortexApp {
                                         ui.spacing_mut().item_spacing.y = 6.0;
 
                                         // Save Directory
-                                        modal_field_label(ui, "Save directory", None, p);
+                                        modal_field_label(
+                                            ui,
+                                            lang.tr("Save directory", "Folder simpan"),
+                                            None,
+                                            p,
+                                        );
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 8.0;
                                             let mut dir_str =
@@ -3124,7 +3664,7 @@ impl VortexApp {
                                                 |ui| {
                                                     if secondary_button(
                                                         ui,
-                                                        "Browse",
+                                                        lang.tr("Browse", "Telusuri"),
                                                         Some(VectorIcon::Folder),
                                                         p,
                                                     )
@@ -3147,15 +3687,18 @@ impl VortexApp {
                                             // Custom Filename
                                             modal_field_label(
                                                 ui,
-                                                "Custom filename",
-                                                Some("Optional"),
+                                                lang.tr("Custom filename", "Nama berkas khusus"),
+                                                Some(lang.tr("Optional", "Opsional")),
                                                 p,
                                             );
                                             let fn_w = ui.available_width();
                                             styled_text_field(
                                                 ui,
                                                 &mut self.add_modal.custom_filename,
-                                                "Leave blank to auto-detect from Content-Disposition or URL",
+                                                lang.tr(
+                                                    "Leave blank to auto-detect from Content-Disposition or URL",
+                                                    "Biarkan kosong untuk deteksi otomatis dari server atau URL",
+                                                ),
                                                 false,
                                                 fn_w,
                                                 p,
@@ -3167,8 +3710,11 @@ impl VortexApp {
                                             let mut conns = self.add_modal.connections as u32;
                                             modal_slider_row(
                                                 ui,
-                                                "Parallel connections",
-                                                Some("HTTP byte-range streams (1–32)"),
+                                                lang.tr("Parallel connections", "Koneksi paralel"),
+                                                Some(lang.tr(
+                                                    "HTTP byte-range streams (1–32)",
+                                                    "Aliran byte-range HTTP (1–32)",
+                                                )),
                                                 &mut conns,
                                                 1,
                                                 32,
@@ -3182,15 +3728,21 @@ impl VortexApp {
                                             // Expected SHA-256 Checksum
                                             modal_field_label(
                                                 ui,
-                                                "Expected SHA-256 checksum",
-                                                Some("Optional"),
+                                                lang.tr(
+                                                    "Expected SHA-256 checksum",
+                                                    "Checksum SHA-256 yang diharapkan",
+                                                ),
+                                                Some(lang.tr("Optional", "Opsional")),
                                                 p,
                                             );
                                             let sha_w = ui.available_width();
                                             styled_text_field(
                                                 ui,
                                                 &mut self.add_modal.expected_sha256,
-                                                "64-char hex digest — auto-verifies cryptographic integrity on completion",
+                                                lang.tr(
+                                                    "64-char hex digest — auto-verifies cryptographic integrity on completion",
+                                                    "64 karakter hex — verifikasi integritas otomatis saat unduhan selesai",
+                                                ),
                                                 true,
                                                 sha_w,
                                                 p,
@@ -3223,20 +3775,26 @@ impl VortexApp {
 
                 // Custom 9Router studio footer band
                 modal_footer(ui, p, |ui| {
-                    if secondary_button(ui, "Cancel", None, p).clicked() {
+                    if secondary_button(ui, lang.tr("Cancel", "Batal"), None, p).clicked() {
                         cancel_clicked = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         let cta_label = if is_torrent {
-                            "Start Torrent"
+                            lang.tr("Start Torrent", "Mulai Torrent")
                         } else {
-                            "Start Download"
+                            lang.tr("Start Download", "Mulai Unduhan")
                         };
                         if brand_cta_button(ui, cta_label, Some(VectorIcon::Play), p).clicked() {
                             should_submit = Some(false);
                         }
-                        if secondary_button(ui, "Add Paused", Some(VectorIcon::Pause), p).clicked()
+                        if secondary_button(
+                            ui,
+                            lang.tr("Add Paused", "Tambah Terjeda"),
+                            Some(VectorIcon::Pause),
+                            p,
+                        )
+                        .clicked()
                         {
                             should_submit = Some(true);
                         }
@@ -3249,7 +3807,7 @@ impl VortexApp {
         }
 
         if trigger_probe {
-            self.start_probe(ctx.clone());
+            self.start_probe(ctx.clone(), lang);
         }
 
         if let Some(start_paused) = should_submit {
@@ -3258,8 +3816,11 @@ impl VortexApp {
             let valid_torrent = is_torrent_input(&url);
             if !valid_http && !valid_torrent {
                 self.add_modal.error = Some(
-                    "Enter an http://, https://, magnet:? link, or select a .torrent file"
-                        .to_string(),
+                    lang.tr(
+                        "Enter an http://, https://, magnet:? link, or select a .torrent file",
+                        "Masukkan tautan http://, https://, magnet:?, atau pilih berkas .torrent",
+                    )
+                    .to_string(),
                 );
                 self.add_modal.open = true;
             } else {
@@ -3287,6 +3848,7 @@ impl VortexApp {
     }
 
     fn render_settings_modal(&mut self, ctx: &egui::Context, p: &Palette) {
+        let lang = self.settings_draft.language;
         let mut cancel_clicked = paint_modal_scrim(ctx, "vortex_settings_scrim", p);
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             cancel_clicked = true;
@@ -3313,8 +3875,11 @@ impl VortexApp {
                     ui,
                     VectorIcon::Gear,
                     p.brand,
-                    "Settings",
-                    "Storage paths, transfer engine, and Windows tray behavior",
+                    lang.tr("Settings", "Pengaturan"),
+                    lang.tr(
+                        "Language, storage paths, transfer engine, and Windows tray behavior",
+                        "Bahasa, lokasi simpan, mesin transfer, dan perilaku baki Windows",
+                    ),
                     None,
                     p,
                 );
@@ -3322,7 +3887,7 @@ impl VortexApp {
                     cancel_clicked = true;
                 }
 
-                // Scrollable body cards (all 3 cards fit cleanly with zero scroll at 960x620)
+                // Scrollable body cards
                 egui::ScrollArea::vertical()
                     .id_salt("settings_modal_scroll")
                     .max_height(max_body_h)
@@ -3333,8 +3898,53 @@ impl VortexApp {
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = 7.0;
 
+                                // Language Selector row at top of Settings
+                                egui::Frame::new()
+                                    .fill(p.surface)
+                                    .corner_radius(CornerRadius::same(11))
+                                    .stroke(Stroke::new(1.0_f32, p.border))
+                                    .inner_margin(Margin::symmetric(12, 8))
+                                    .show(ui, |ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(lang.tr(
+                                                    "Language / Bahasa",
+                                                    "Bahasa / Language",
+                                                ))
+                                                .font(bold_font(11.5))
+                                                .color(p.text_main),
+                                            );
+                                            ui.with_layout(
+                                                Layout::right_to_left(Align::Center),
+                                                |ui| {
+                                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                                    for opt in
+                                                        [Language::Indonesian, Language::English]
+                                                    {
+                                                        if preset_chip(
+                                                            ui,
+                                                            opt.label(),
+                                                            self.settings_draft.language == opt,
+                                                            p,
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            self.settings_draft.language = opt;
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    });
+
                                 // Card 1: Storage & Destination
-                                modal_section_card(ui, "STORAGE & DESTINATION", p.brand, p, |ui| {
+                                modal_section_card(
+                                    ui,
+                                    lang.tr("STORAGE & DESTINATION", "PENYIMPANAN & TUJUAN"),
+                                    p.brand,
+                                    p,
+                                    |ui| {
                                     ui.spacing_mut().item_spacing.y = 4.0;
 
                                     ui.horizontal(|ui| {
@@ -3363,7 +3973,7 @@ impl VortexApp {
                                             |ui| {
                                                 if secondary_button(
                                                     ui,
-                                                    "Browse",
+                                                    lang.tr("Browse", "Telusuri"),
                                                     Some(VectorIcon::Folder),
                                                     p,
                                                 )
@@ -3386,8 +3996,14 @@ impl VortexApp {
 
                                     modal_toggle_row(
                                         ui,
-                                        "Auto-sort into category subfolders",
-                                        Some("Programs, Archives, Videos, Torrents, Documents..."),
+                                        lang.tr(
+                                            "Auto-sort into category subfolders",
+                                            "Urutkan otomatis ke subfolder kategori",
+                                        ),
+                                        Some(lang.tr(
+                                            "Programs, Archives, Videos, Torrents, Documents...",
+                                            "Program, Arsip, Video, Torrent, Dokumen...",
+                                        )),
                                         &mut self.settings_draft.organize_by_category,
                                         true,
                                         false,
@@ -3398,7 +4014,10 @@ impl VortexApp {
                                 // Card 2: Transfer Engine & Bandwidth
                                 modal_section_card(
                                     ui,
-                                    "TRANSFER ENGINE & BANDWIDTH",
+                                    lang.tr(
+                                        "TRANSFER ENGINE & BANDWIDTH",
+                                        "MESIN TRANSFER & BANDWIDTH",
+                                    ),
                                     p.brand,
                                     p,
                                     |ui| {
@@ -3408,7 +4027,10 @@ impl VortexApp {
                                             self.settings_draft.default_connections as u32;
                                         modal_slider_row(
                                             ui,
-                                            "Connections per download",
+                                            lang.tr(
+                                                "Connections per download",
+                                                "Koneksi per unduhan",
+                                            ),
                                             None,
                                             &mut conns,
                                             1,
@@ -3422,7 +4044,10 @@ impl VortexApp {
                                             self.settings_draft.max_concurrent_downloads as u32;
                                         modal_slider_row(
                                             ui,
-                                            "Max simultaneous downloads",
+                                            lang.tr(
+                                                "Max simultaneous downloads",
+                                                "Maks unduhan bersamaan",
+                                            ),
                                             None,
                                             &mut max_conc,
                                             1,
@@ -3436,7 +4061,10 @@ impl VortexApp {
                                         let mut retries = self.settings_draft.max_retries;
                                         modal_slider_row(
                                             ui,
-                                            "Retry attempts per segment",
+                                            lang.tr(
+                                                "Retry attempts per segment",
+                                                "Percobaan ulang per segmen",
+                                            ),
                                             None,
                                             &mut retries,
                                             0,
@@ -3458,14 +4086,18 @@ impl VortexApp {
                                             ui.vertical(|ui| {
                                                 ui.spacing_mut().item_spacing.y = 0.0;
                                                 ui.label(
-                                                    RichText::new("Global speed cap")
-                                                        .font(body_font(12.0))
-                                                        .color(p.text_main),
+                                                    RichText::new(lang.tr(
+                                                        "Global speed cap",
+                                                        "Batas kecepatan global",
+                                                    ))
+                                                    .font(body_font(12.0))
+                                                    .color(p.text_main),
                                                 );
                                                 ui.label(
-                                                    RichText::new(
+                                                    RichText::new(lang.tr(
                                                         "HTTP & BitTorrent (0 = Unlimited)",
-                                                    )
+                                                        "HTTP & BitTorrent (0 = Tanpa Batas)",
+                                                    ))
                                                     .font(body_font(10.0))
                                                     .color(p.text_muted),
                                                 );
@@ -3493,7 +4125,7 @@ impl VortexApp {
                                                         ("10M", 10240u64),
                                                         ("5M", 5120u64),
                                                         ("2M", 2048u64),
-                                                        ("Unlim", 0u64),
+                                                        (lang.tr("Unlim", "Penuh"), 0u64),
                                                     ] {
                                                         if preset_chip(
                                                             ui,
@@ -3516,7 +4148,10 @@ impl VortexApp {
                                 // Card 3: Windows Tray & Automation
                                 modal_section_card(
                                     ui,
-                                    "WINDOWS TRAY & AUTOMATION",
+                                    lang.tr(
+                                        "WINDOWS TRAY & AUTOMATION",
+                                        "BAKI WINDOWS & OTOMASI",
+                                    ),
                                     p.brand,
                                     p,
                                     |ui| {
@@ -3524,7 +4159,10 @@ impl VortexApp {
 
                                         modal_toggle_row(
                                             ui,
-                                            "Minimize to System Tray when closing window (X)",
+                                            lang.tr(
+                                                "Minimize to System Tray when closing window (X)",
+                                                "Kecilkan ke Baki Sistem saat menutup jendela (X)",
+                                            ),
                                             None,
                                             &mut self.settings_draft.close_to_tray,
                                             true,
@@ -3536,7 +4174,10 @@ impl VortexApp {
 
                                         modal_toggle_row(
                                             ui,
-                                            "Start VortexDM automatically on Windows logon",
+                                            lang.tr(
+                                                "Start VortexDM automatically on Windows logon",
+                                                "Jalankan VortexDM otomatis saat masuk Windows",
+                                            ),
                                             None,
                                             &mut self.settings_draft.start_with_windows,
                                             true,
@@ -3546,7 +4187,10 @@ impl VortexApp {
 
                                         modal_toggle_row(
                                             ui,
-                                            "Launch minimized directly in System Tray",
+                                            lang.tr(
+                                                "Launch minimized directly in System Tray",
+                                                "Luncurkan langsung diminimalkan di Baki Sistem",
+                                            ),
                                             None,
                                             &mut self.settings_draft.start_minimized,
                                             self.settings_draft.start_with_windows,
@@ -3558,7 +4202,10 @@ impl VortexApp {
 
                                         modal_toggle_row(
                                             ui,
-                                            "Clipboard link guard (detect copied HTTP & magnet:? links)",
+                                            lang.tr(
+                                                "Clipboard link guard (detect copied HTTP & magnet:? links)",
+                                                "Pemantau papan klip (deteksi tautan HTTP & magnet:? tersalin)",
+                                            ),
                                             None,
                                             &mut self.settings_draft.clipboard_monitoring,
                                             true,
@@ -3570,7 +4217,10 @@ impl VortexApp {
 
                                         modal_toggle_row(
                                             ui,
-                                            "Automatically compute SHA-256 checksum on completion",
+                                            lang.tr(
+                                                "Automatically compute SHA-256 checksum on completion",
+                                                "Hitung checksum SHA-256 otomatis saat selesai",
+                                            ),
                                             None,
                                             &mut self.settings_draft.auto_verify_sha256,
                                             true,
@@ -3585,18 +4235,23 @@ impl VortexApp {
                 // Custom 9Router studio footer band
                 modal_footer(ui, p, |ui| {
                     ui.label(
-                        RichText::new("Esc to discard")
+                        RichText::new(lang.tr("Esc to discard", "Esc untuk membatalkan"))
                             .font(body_font(11.0))
                             .color(p.text_subtle),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        if brand_cta_button(ui, "Save Settings", Some(VectorIcon::Check), p)
-                            .clicked()
+                        if brand_cta_button(
+                            ui,
+                            lang.tr("Save Settings", "Simpan Pengaturan"),
+                            Some(VectorIcon::Check),
+                            p,
+                        )
+                        .clicked()
                         {
                             save_clicked = true;
                         }
-                        if secondary_button(ui, "Cancel", None, p).clicked() {
+                        if secondary_button(ui, lang.tr("Cancel", "Batal"), None, p).clicked() {
                             cancel_clicked = true;
                         }
                     });
@@ -3608,6 +4263,7 @@ impl VortexApp {
         }
 
         if save_clicked {
+            let saved_lang = self.settings_draft.language;
             let kb = self
                 .speed_limit_kb_draft
                 .trim()
@@ -3621,11 +4277,11 @@ impl VortexApp {
             self.engine
                 .send(EngineCommand::UpdateSettings(self.settings_draft.clone()));
             self.settings_open = false;
-            self.notify("Settings saved");
+            self.notify(saved_lang.tr("Settings saved", "Pengaturan disimpan"));
         }
     }
 
-    fn render_delete_confirm_modal(&mut self, ctx: &egui::Context, p: &Palette) {
+    fn render_delete_confirm_modal(&mut self, ctx: &egui::Context, lang: Language, p: &Palette) {
         let Some(mut state) = self.delete_confirm.take() else {
             return;
         };
@@ -3643,16 +4299,22 @@ impl VortexApp {
         let modal_w = if is_multi { 460.0 } else { 436.0 };
 
         let header_title = if is_multi {
-            format!("Delete {} Downloads?", count)
+            format!("{} {} {}?", lang.tr("Delete", "Hapus"), count, lang.tr("Downloads", "Unduhan"))
         } else if state.items[0].is_torrent {
-            "Delete Torrent?".to_string()
+            lang.tr("Delete Torrent?", "Hapus Torrent?").to_string()
         } else {
-            "Delete Download?".to_string()
+            lang.tr("Delete Download?", "Hapus Unduhan?").to_string()
         };
         let header_sub = if is_multi {
-            "Selected transfers will be stopped and removed"
+            lang.tr(
+                "Selected transfers will be stopped and removed",
+                "Transfer yang dipilih akan dihentikan dan dihapus",
+            )
         } else {
-            "This transfer will be stopped and removed from VortexDM"
+            lang.tr(
+                "This transfer will be stopped and removed from VortexDM",
+                "Transfer ini akan dihentikan dan dihapus dari VortexDM",
+            )
         };
 
         egui::Window::new("Delete Download")
@@ -3676,7 +4338,7 @@ impl VortexApp {
                     &header_title,
                     header_sub,
                     if is_multi {
-                        Some(("BULK DELETE", p.danger))
+                        Some((lang.tr("BULK DELETE", "HAPUS MASSAL"), p.danger))
                     } else {
                         None
                     },
@@ -3702,9 +4364,14 @@ impl VortexApp {
 
                                 ui.label(
                                     RichText::new(if is_multi {
-                                        format!("SELECTED TRANSFERS ({})", count)
+                                        format!(
+                                            "{} ({})",
+                                            lang.tr("SELECTED TRANSFERS", "TRANSFER DIPILIH"),
+                                            count
+                                        )
                                     } else {
-                                        "SELECTED TRANSFER".to_string()
+                                        lang.tr("SELECTED TRANSFER", "TRANSFER DIPILIH")
+                                            .to_string()
                                     })
                                     .font(bold_font(9.5))
                                     .color(p.text_subtle),
@@ -3784,13 +4451,22 @@ impl VortexApp {
 
                                 let all_completed = state.items.iter().all(|it| it.is_completed);
                                 let sub_text = if all_completed {
-                                    "Permanently removes downloaded data from disk"
+                                    lang.tr(
+                                        "Permanently removes downloaded data from disk",
+                                        "Menghapus data unduhan secara permanen dari disk",
+                                    )
                                 } else {
-                                    "Also removes downloaded or partial data from disk"
+                                    lang.tr(
+                                        "Also removes downloaded or partial data from disk",
+                                        "Juga menghapus data unduhan atau bagian sementara dari disk",
+                                    )
                                 };
                                 modal_toggle_row(
                                     ui,
-                                    "Also delete files from disk",
+                                    lang.tr(
+                                        "Also delete files from disk",
+                                        "Hapus berkas juga dari disk",
+                                    ),
                                     Some(sub_text),
                                     &mut state.delete_files,
                                     true,
@@ -3814,9 +4490,15 @@ impl VortexApp {
                                             ui.set_width(ui.available_width());
                                             ui.label(
                                                 RichText::new(if is_multi {
-                                                    "All selected files will be permanently removed from your folder."
+                                                    lang.tr(
+                                                        "All selected files will be permanently removed from your folder.",
+                                                        "Semua berkas yang dipilih akan dihapus permanen dari folder Anda.",
+                                                    )
                                                 } else {
-                                                    "Deleted files will be permanently removed from your folder."
+                                                    lang.tr(
+                                                        "Deleted files will be permanently removed from your folder.",
+                                                        "Berkas yang dihapus akan hilang secara permanen dari folder Anda.",
+                                                    )
                                                 })
                                                 .font(body_font(11.0))
                                                 .color(p.danger),
@@ -3828,23 +4510,31 @@ impl VortexApp {
 
                 modal_footer(ui, p, |ui| {
                     ui.label(
-                        RichText::new("Esc to cancel")
+                        RichText::new(lang.tr("Esc to cancel", "Esc untuk membatalkan"))
                             .font(body_font(11.0))
                             .color(p.text_subtle),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         let del_label = match (is_multi, state.delete_files) {
-                            (true, true) => format!("Delete + Files ({})", count),
-                            (true, false) => format!("Remove ({})", count),
-                            (false, true) => "Delete + Files".to_string(),
-                            (false, false) => "Remove".to_string(),
+                            (true, true) => format!(
+                                "{} ({})",
+                                lang.tr("Delete + Files", "Hapus + Berkas"),
+                                count
+                            ),
+                            (true, false) => {
+                                format!("{} ({})", lang.tr("Remove", "Hapus"), count)
+                            }
+                            (false, true) => {
+                                lang.tr("Delete + Files", "Hapus + Berkas").to_string()
+                            }
+                            (false, false) => lang.tr("Remove", "Hapus").to_string(),
                         };
                         if danger_cta_button(ui, &del_label, Some(VectorIcon::Trash), p).clicked()
                         {
                             confirm_clicked = true;
                         }
-                        if secondary_button(ui, "Cancel", None, p).clicked() {
+                        if secondary_button(ui, lang.tr("Cancel", "Batal"), None, p).clicked() {
                             cancel_clicked = true;
                         }
                     });
@@ -3866,9 +4556,9 @@ impl VortexApp {
                     delete_file,
                 });
                 self.notify(if delete_file {
-                    "Removed & deleted files"
+                    lang.tr("Removed & deleted files", "Dihapus beserta berkas")
                 } else {
-                    "Removed download"
+                    lang.tr("Removed download", "Unduhan dihapus")
                 });
             } else {
                 let n = ids.len();
@@ -3877,9 +4567,19 @@ impl VortexApp {
                     delete_file,
                 });
                 self.notify(if delete_file {
-                    format!("Removed & deleted files for {} downloads", n)
+                    format!(
+                        "{} {} {}",
+                        lang.tr("Removed & deleted files for", "Dihapus beserta berkas untuk"),
+                        n,
+                        lang.tr("downloads", "unduhan")
+                    )
                 } else {
-                    format!("Removed {} downloads", n)
+                    format!(
+                        "{} {} {}",
+                        lang.tr("Removed", "Menghapus"),
+                        n,
+                        lang.tr("downloads", "unduhan")
+                    )
                 });
             }
         } else if !cancel_clicked {
@@ -3893,6 +4593,7 @@ impl VortexApp {
         snap: &EngineSnapshot,
         p: &Palette,
     ) {
+        let lang = snap.settings.language;
         let completed_items: Vec<&DownloadItem> = snap
             .downloads
             .iter()
@@ -3913,11 +4614,20 @@ impl VortexApp {
         let modal_w = 450.0;
 
         let header_title = if is_multi {
-            format!("Clear {} Completed Downloads?", count)
+            format!(
+                "{} {} {}?",
+                lang.tr("Clear", "Bersihkan"),
+                count,
+                lang.tr("Completed Downloads", "Unduhan Selesai")
+            )
         } else {
-            "Clear Completed Download?".to_string()
+            lang.tr("Clear Completed Download?", "Bersihkan Unduhan Selesai?")
+                .to_string()
         };
-        let header_sub = "Finished entries will be removed from your completed list";
+        let header_sub = lang.tr(
+            "Finished entries will be removed from your completed list",
+            "Daftar unduhan selesai akan dibersihkan dari tampilan",
+        );
 
         egui::Window::new("Clear Completed")
             .id(egui::Id::new("vortex_clear_completed_modal"))
@@ -3961,9 +4671,13 @@ impl VortexApp {
                                 ui.spacing_mut().item_spacing.y = 7.0;
 
                                 ui.label(
-                                    RichText::new(format!("COMPLETED TRANSFERS ({})", count))
-                                        .font(bold_font(9.5))
-                                        .color(p.text_subtle),
+                                    RichText::new(format!(
+                                        "{} ({})",
+                                        lang.tr("COMPLETED TRANSFERS", "UNDUHAN SELESAI"),
+                                        count
+                                    ))
+                                    .font(bold_font(9.5))
+                                    .color(p.text_subtle),
                                 );
 
                                 egui::Frame::new()
@@ -4051,9 +4765,10 @@ impl VortexApp {
                                     .show(ui, |ui| {
                                         ui.set_width(ui.available_width());
                                         ui.label(
-                                            RichText::new(
+                                            RichText::new(lang.tr(
                                                 "Your downloaded files on disk will not be deleted.",
-                                            )
+                                                "Berkas hasil unduhan Anda di disk tidak akan dihapus.",
+                                            ))
                                             .font(body_font(11.0))
                                             .color(p.success),
                                         );
@@ -4063,21 +4778,25 @@ impl VortexApp {
 
                 modal_footer(ui, p, |ui| {
                     ui.label(
-                        RichText::new("Esc to cancel")
+                        RichText::new(lang.tr("Esc to cancel", "Esc untuk membatalkan"))
                             .font(body_font(11.0))
                             .color(p.text_subtle),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         let cta_label = if is_multi {
-                            format!("Clear Completed ({})", count)
+                            format!(
+                                "{} ({})",
+                                lang.tr("Clear Completed", "Bersihkan Selesai"),
+                                count
+                            )
                         } else {
-                            "Clear Completed".to_string()
+                            lang.tr("Clear Completed", "Bersihkan Selesai").to_string()
                         };
                         if brand_cta_button(ui, &cta_label, Some(VectorIcon::Clear), p).clicked() {
                             confirm_clicked = true;
                         }
-                        if secondary_button(ui, "Cancel", None, p).clicked() {
+                        if secondary_button(ui, lang.tr("Cancel", "Batal"), None, p).clicked() {
                             cancel_clicked = true;
                         }
                     });
@@ -4093,13 +4812,17 @@ impl VortexApp {
             }
             self.engine.send(EngineCommand::ClearCompleted);
             self.clear_completed_confirm = false;
-            self.notify("Cleared completed downloads");
+            self.notify(lang.tr(
+                "Cleared completed downloads",
+                "Daftar unduhan selesai dibersihkan",
+            ));
         } else if cancel_clicked {
             self.clear_completed_confirm = false;
         }
     }
 
     fn render_footer(&mut self, ui: &mut egui::Ui, snap: &EngineSnapshot, p: &Palette) {
+        let lang = snap.settings.language;
         ui.horizontal(|ui| {
             let tray_ok = self.tray.is_some();
             let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
@@ -4110,9 +4833,9 @@ impl VortexApp {
             );
             let tray_lbl = ui.label(
                 RichText::new(if tray_ok {
-                    "System Tray Active"
+                    lang.tr("System Tray Active", "Baki Sistem Aktif")
                 } else {
-                    "Tray Unavailable"
+                    lang.tr("Tray Unavailable", "Baki Sistem Tidak Tersedia")
                 })
                 .font(body_font(11.5))
                 .color(p.text_muted),
@@ -4124,9 +4847,12 @@ impl VortexApp {
             if snap.settings.clipboard_monitoring {
                 ui.label(RichText::new("•").color(p.border));
                 ui.label(
-                    RichText::new("Clipboard Guard ON")
-                        .font(body_font(11.5))
-                        .color(p.text_subtle),
+                    RichText::new(lang.tr(
+                        "Clipboard Guard ON",
+                        "Pemantau Papan Klip AKTIF",
+                    ))
+                    .font(body_font(11.5))
+                    .color(p.text_subtle),
                 );
             }
 
@@ -4146,16 +4872,21 @@ impl VortexApp {
                 if let Some(free) = self.cached_disk_free {
                     ui.label(RichText::new("•").color(p.border));
                     ui.label(
-                        RichText::new(format!("Free: {}", format_bytes(free)))
-                            .font(mono_font(11.0))
-                            .color(p.text_muted),
+                        RichText::new(format!(
+                            "{} {}",
+                            lang.tr("Free:", "Tersedia:"),
+                            format_bytes(free)
+                        ))
+                        .font(mono_font(11.0))
+                        .color(p.text_muted),
                     );
                 }
                 ui.label(RichText::new("•").color(p.border));
                 ui.label(
                     RichText::new(format!(
-                        "{} active  /  {} total",
+                        "{} {}  /  {} total",
                         snap.stats.active_count,
+                        lang.tr("active", "aktif"),
                         snap.downloads.len()
                     ))
                     .font(mono_font(11.0))

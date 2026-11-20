@@ -18,6 +18,8 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed breakdown of all development cha
   - Segmented **Downloads / Completed** view with scoped **`Pause All`** / **`Resume All`** controls on the **Downloads** tab and confirmed **`Clear Completed`** cleanup on the **Completed** tab.
   - Compact download rows with responsive auto-truncating filenames, inline progress bars, and aligned multi-select (`Select All`, `Ctrl+A`, `Esc`, `Delete`, `Shift+Delete`) with a contextual bulk action bar.
   - Confirmation modals for **New Download / Confirm Torrent Download**, **Delete Download(s)** (with optional disk file deletion), and **Clear Completed Downloads**.
+- **Bilingual UI (English & Bahasa Indonesia)**:
+  - Instant header **`EN` / `ID`** language switch and **Settings** selector translating the main workspace, modals, status pills, inspector, and system tray flyout between **English** and **Bahasa Indonesia**.
 - **Global Bandwidth Throttling**:
   - Live rate limits (`Unlimited`, `512 KB/s`, `2 MB/s`, `5 MB/s`, `10 MB/s`, `25 MB/s`, or custom KB/s) applied across active transfers.
 - **Custom Windows System Tray Flyout & Single-Instance IPC**:

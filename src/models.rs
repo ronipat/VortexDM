@@ -11,6 +11,36 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const WINDOW_TITLE: &str = "VortexDM — Download Manager";
 pub const TRAY_POPUP_TITLE: &str = "VortexDM Tray Popup";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Language {
+    #[default]
+    English,
+    Indonesian,
+}
+
+impl Language {
+    pub fn tr<'a>(self, en: &'a str, id: &'a str) -> &'a str {
+        match self {
+            Language::English => en,
+            Language::Indonesian => id,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Language::English => "EN",
+            Language::Indonesian => "ID",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::Indonesian => "Bahasa Indonesia",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownloadStatus {
     Queued,
@@ -25,15 +55,19 @@ pub enum DownloadStatus {
 
 impl DownloadStatus {
     pub fn label(&self) -> &'static str {
+        self.label_tr(Language::English)
+    }
+
+    pub fn label_tr(&self, lang: Language) -> &'static str {
         match self {
-            DownloadStatus::Queued => "Queued",
-            DownloadStatus::Probing => "Connecting",
-            DownloadStatus::Downloading => "Downloading",
-            DownloadStatus::Paused => "Paused",
-            DownloadStatus::Verifying => "Verifying",
-            DownloadStatus::Completed => "Completed",
-            DownloadStatus::Failed => "Failed",
-            DownloadStatus::Cancelled => "Cancelled",
+            DownloadStatus::Queued => lang.tr("Queued", "Antrean"),
+            DownloadStatus::Probing => lang.tr("Connecting", "Menghubungkan"),
+            DownloadStatus::Downloading => lang.tr("Downloading", "Mengunduh"),
+            DownloadStatus::Paused => lang.tr("Paused", "Dijeda"),
+            DownloadStatus::Verifying => lang.tr("Verifying", "Memverifikasi"),
+            DownloadStatus::Completed => lang.tr("Completed", "Selesai"),
+            DownloadStatus::Failed => lang.tr("Failed", "Gagal"),
+            DownloadStatus::Cancelled => lang.tr("Cancelled", "Dibatalkan"),
         }
     }
 
@@ -70,15 +104,19 @@ impl FileCategory {
     ];
 
     pub fn label(&self) -> &'static str {
+        self.label_tr(Language::English)
+    }
+
+    pub fn label_tr(&self, lang: Language) -> &'static str {
         match self {
-            FileCategory::Programs => "Programs",
-            FileCategory::Archives => "Archives",
-            FileCategory::Videos => "Videos",
-            FileCategory::Music => "Music",
-            FileCategory::Documents => "Documents",
-            FileCategory::Images => "Images",
-            FileCategory::Torrents => "Torrents",
-            FileCategory::Other => "Other",
+            FileCategory::Programs => lang.tr("Programs", "Program"),
+            FileCategory::Archives => lang.tr("Archives", "Arsip"),
+            FileCategory::Videos => lang.tr("Videos", "Video"),
+            FileCategory::Music => lang.tr("Music", "Musik"),
+            FileCategory::Documents => lang.tr("Documents", "Dokumen"),
+            FileCategory::Images => lang.tr("Images", "Gambar"),
+            FileCategory::Torrents => lang.tr("Torrents", "Torrent"),
+            FileCategory::Other => lang.tr("Other", "Lainnya"),
         }
     }
 
@@ -413,6 +451,8 @@ pub struct AppSettings {
     pub max_retries: u32,
     #[serde(default = "default_dark_mode")]
     pub dark_mode: bool,
+    #[serde(default)]
+    pub language: Language,
 }
 
 impl Default for AppSettings {
@@ -434,6 +474,7 @@ impl Default for AppSettings {
             auto_verify_sha256: false,
             max_retries: 5,
             dark_mode: true,
+            language: Language::English,
         }
     }
 }

@@ -126,6 +126,7 @@ fn render_popup_contents(
     snap: &EngineSnapshot,
     p: &Palette,
 ) {
+    let lang = snap.settings.language;
     let is_active = snap.stats.active_count > 0;
 
     // --- 1. COMPACT HEADER ROW ---
@@ -141,7 +142,11 @@ fn render_popup_contents(
         );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let status_txt = if is_active { "Live" } else { "Ready" };
+            let status_txt = if is_active {
+                lang.tr("Live", "Aktif")
+            } else {
+                lang.tr("Ready", "Siap")
+            };
             let (pill_rect, _) = ui.allocate_exact_size(Vec2::new(58.0, 22.0), Sense::hover());
             ui.painter()
                 .rect_filled(pill_rect, CornerRadius::same(99), p.surface);
@@ -186,7 +191,7 @@ fn render_popup_contents(
             ui.columns(2, |cols| {
                 cols[0].spacing_mut().item_spacing.y = 1.0;
                 cols[0].label(
-                    RichText::new("SPEED (DL)")
+                    RichText::new(lang.tr("SPEED (DL)", "KECEPATAN"))
                         .font(bold_font(9.0))
                         .color(p.text_muted),
                 );
@@ -198,7 +203,7 @@ fn render_popup_contents(
 
                 cols[1].spacing_mut().item_spacing.y = 1.0;
                 cols[1].label(
-                    RichText::new("ACTIVE / SOCKETS")
+                    RichText::new(lang.tr("ACTIVE / SOCKETS", "AKTIF / SOKET"))
                         .font(bold_font(9.0))
                         .color(p.text_muted),
                 );
@@ -225,7 +230,8 @@ fn render_popup_contents(
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!(
-                        "Session: {}",
+                        "{} {}",
+                        lang.tr("Session:", "Sesi:"),
                         format_bytes(snap.stats.session_downloaded_bytes)
                     ))
                     .font(mono_font(10.0))
@@ -236,11 +242,18 @@ fn render_popup_contents(
                         format!("UL {}", format_speed(snap.stats.total_upload_speed_bps))
                     } else if snap.stats.paused_count > 0 {
                         format!(
-                            "{} Done • {} Paused",
-                            snap.stats.completed_count, snap.stats.paused_count
+                            "{} {} • {} {}",
+                            snap.stats.completed_count,
+                            lang.tr("Done", "Selesai"),
+                            snap.stats.paused_count,
+                            lang.tr("Paused", "Dijeda")
                         )
                     } else {
-                        format!("{} Done", snap.stats.completed_count)
+                        format!(
+                            "{} {}",
+                            snap.stats.completed_count,
+                            lang.tr("Done", "Selesai")
+                        )
                     };
                     ui.label(
                         RichText::new(right_text)
@@ -260,7 +273,7 @@ fn render_popup_contents(
         ui,
         VectorIcon::Monitor,
         p.brand,
-        "Open Full Manager",
+        lang.tr("Open Full Manager", "Buka Manajer Utama"),
         p.text_main,
         Some(VectorIcon::ChevronRight),
         p.brand,
@@ -289,7 +302,15 @@ fn render_popup_contents(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.columns(3, |cols| {
-                if segmented_pill_btn(&mut cols[0], "+ New", false, Some(p.brand), p).clicked() {
+                if segmented_pill_btn(
+                    &mut cols[0],
+                    lang.tr("+ New", "+ Baru"),
+                    false,
+                    Some(p.brand),
+                    p,
+                )
+                .clicked()
+                {
                     shared.hide_popup();
                     let main_hwnd = platform::resolve_hwnd(
                         shared.main_hwnd.load(Ordering::Relaxed),
@@ -303,11 +324,15 @@ fn render_popup_contents(
                     ctx.request_repaint_of(ViewportId::ROOT);
                 }
 
-                if segmented_pill_btn(&mut cols[1], "Pause", false, None, p).clicked() {
+                if segmented_pill_btn(&mut cols[1], lang.tr("Pause", "Jeda"), false, None, p)
+                    .clicked()
+                {
                     let _ = shared.engine_cmd_tx.send(EngineCommand::PauseAll);
                 }
 
-                if segmented_pill_btn(&mut cols[2], "Resume", false, None, p).clicked() {
+                if segmented_pill_btn(&mut cols[2], lang.tr("Resume", "Lanjut"), false, None, p)
+                    .clicked()
+                {
                     let _ = shared.engine_cmd_tx.send(EngineCommand::ResumeAll);
                 }
             });
@@ -323,13 +348,15 @@ fn render_popup_contents(
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 5.0;
             ui.label(
-                RichText::new("Theme")
+                RichText::new(lang.tr("Theme", "Tema"))
                     .font(body_font(10.5))
                     .color(p.text_muted),
             );
             ui.columns(2, |cols| {
                 let is_dark = snap.settings.dark_mode;
-                if segmented_pill_btn(&mut cols[0], "Dark", is_dark, None, p).clicked() && !is_dark
+                if segmented_pill_btn(&mut cols[0], lang.tr("Dark", "Gelap"), is_dark, None, p)
+                    .clicked()
+                    && !is_dark
                 {
                     let mut updated = snap.settings.clone();
                     updated.dark_mode = true;
@@ -338,7 +365,15 @@ fn render_popup_contents(
                         .send(EngineCommand::UpdateSettings(updated));
                     ctx.request_repaint_of(ViewportId::ROOT);
                 }
-                if segmented_pill_btn(&mut cols[1], "Light", !is_dark, None, p).clicked() && is_dark
+                if segmented_pill_btn(
+                    &mut cols[1],
+                    lang.tr("Light", "Terang"),
+                    !is_dark,
+                    None,
+                    p,
+                )
+                .clicked()
+                    && is_dark
                 {
                     let mut updated = snap.settings.clone();
                     updated.dark_mode = false;
@@ -352,7 +387,16 @@ fn render_popup_contents(
 
     // --- 6. START WITH WINDOWS TOGGLE CARD ---
     let autostart_on = shared.autostart_cached.load(Ordering::Relaxed);
-    if toggle_row_card(ui, "Start with Windows", autostart_on, p).clicked() {
+    if toggle_row_card(
+        ui,
+        lang.tr("Start with Windows", "Mulai bersama Windows"),
+        autostart_on,
+        lang.tr("On", "Aktif"),
+        lang.tr("Off", "Mati"),
+        p,
+    )
+    .clicked()
+    {
         let next = !autostart_on;
         shared.autostart_cached.store(next, Ordering::Relaxed);
         let mut updated = snap.settings.clone();
@@ -368,7 +412,7 @@ fn render_popup_contents(
         ui,
         VectorIcon::CloseX,
         p.danger,
-        "Quit",
+        lang.tr("Quit", "Keluar"),
         p.danger,
         None,
         p.danger,
@@ -504,7 +548,14 @@ fn segmented_pill_btn(
     resp
 }
 
-fn toggle_row_card(ui: &mut Ui, label: &str, checked: bool, p: &Palette) -> egui::Response {
+fn toggle_row_card(
+    ui: &mut Ui,
+    label: &str,
+    checked: bool,
+    on_label: &str,
+    off_label: &str,
+    p: &Palette,
+) -> egui::Response {
     let desired = Vec2::new(ui.available_width(), 33.0);
     let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
 
@@ -557,7 +608,7 @@ fn toggle_row_card(ui: &mut Ui, label: &str, checked: bool, p: &Palette) -> egui
     ui.painter().text(
         Pos2::new(rect.max.x - 13.0, rect.center().y),
         Align2::RIGHT_CENTER,
-        if checked { "On" } else { "Off" },
+        if checked { on_label } else { off_label },
         if checked { bold_font(11.0) } else { body_font(11.0) },
         if checked { p.success } else { p.text_muted },
     );
